@@ -18,7 +18,9 @@
     "@workspace/eslint-config": "workspace:*",
     "@workspace/typescript-config": "workspace:*",
     "eslint": "^9",
-    "typescript": "^5"
+    "target-corebank": "workspace:*",
+    "typescript": "^5",
+    "vitest": "^4.1.11"
   },
   "dependencies": {
     "@workspace/contracts": "workspace:*",

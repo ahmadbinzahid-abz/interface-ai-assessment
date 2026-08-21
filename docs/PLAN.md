@@ -198,7 +198,7 @@ adding an outcome to a capability breaks the build until the UI handles it.
 |---|---|---|
 | 0 ✅ | Deps via official CLIs; `apps/web` → `src/features/…`; Vitest; docker-compose Postgres | `pnpm typecheck` + `pnpm lint` clean |
 | 1 ✅ | `apps/target-corebank`: search → detail → sub-account form → confirmation; framesets, tables, no test IDs; session cookie; 2 tenant variants; `?fault=` injection | Every fault path walkable by hand |
-| 2 | `packages/contracts` (schema + unions) and `packages/surface` (AX observation, ranked resolver, screencast) | Resolver unit tests pass on hostile markup; `Surface` signature has zero Playwright types |
+| 2 ✅ | `packages/contracts` (schema + unions) and `packages/surface` (AX observation, ranked resolver, screencast) | Resolver unit tests pass on hostile markup; `Surface` signature has zero Playwright types |
 | 3 | Discovery loop (Gemini tool use), policy chokepoint, evidence writer, artifact compiler (parameterization + checkpoint inference) | **One real LLM run** completes the goal and emits an artifact into `/evidence/` |
 | 4 | Replay engine: executor, detection ordering, recovery layer, result contract, output extraction | Happy path + all seven fault paths hit the correct branch of the result union |
 | 5 | Session manager, control lease, intervention API, WS screencast + input forwarding, operator capture, handback | Live run pauses → human drives → hands back → run completes |
@@ -218,6 +218,34 @@ adding an outcome to a capability breaks the build until the UI handles it.
 | bad field value → validation error | business outcome |
 | hard 500 | hard failure with debuggable detail |
 | "Close Account" button present | irreversible action → policy blocks, escalates |
+
+## 10a. Phase 2 findings
+
+**Phase 2 — complete.** `packages/contracts` holds the whole vocabulary: values and
+`ValueRef`, ranked targeting, conditions, actions and the risk ladder, the capability
+artifact, the replay result union, tenant overlays, and observations.
+`packages/surface` holds the `Surface` seam, the pure ranked resolver, the control
+lease, and the Playwright/CDP adapter. 56 tests pass.
+
+Two corrections that came out of running the thing rather than reasoning about it:
+
+1. **Role is a filter, not a strategy.** The first resolver draft treated a bare
+   `role` as rank 0, so a descriptor saying "a textbox, in the cell right of
+   *Member Number*" matched *every* textbox on the page at rank 0 and reported
+   ambiguity before the anchor was ever tried. Role now constrains every strategy;
+   only `name` makes role+name a strategy of its own. Similarly, `name` is applied
+   *only* to the role+name strategy — re-applying it to an anchor's candidates
+   rejects the very control the anchor exists to find, since that control usually
+   has no name at all.
+2. **Chromium reports layout tables under private roles.** The raw CDP tree returns
+   `LayoutTable` / `LayoutTableRow` / `LayoutTableCell` for presentational tables —
+   which is every form in this class of application. Playwright's `ariaSnapshot`
+   shows the ARIA roles and hides this completely, so the earlier probe was
+   misleading; only dumping `Accessibility.getFullAXTree` revealed it. Without the
+   mapping, no relational anchor resolves anything. Both are pinned by tests.
+
+Also worth recording: `Accessibility.getFullAXTree` returns *ignored* nodes, and they
+are kept deliberately — they carry the parent chain that relational anchors walk.
 
 ## 10. Status log
 
