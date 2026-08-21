@@ -1,4 +1,5 @@
 import type {
+  NodeBounds,
   Observation,
   Resolution,
   TargetDescriptor,
@@ -48,6 +49,13 @@ export type TargetHandle =
     }
   /** Resolved by position. The last resort, and the one a desktop surface shares. */
   | { readonly _tag: "point"; readonly x: number; readonly y: number }
+
+/** What the adapter can tell us about a resolved control, for recording. */
+export interface ElementDetail {
+  readonly attributes: Record<string, string>
+  readonly bounds?: NodeBounds
+  readonly viewport?: { readonly width: number; readonly height: number }
+}
 
 export interface ResolvedTarget {
   readonly handle: TargetHandle
@@ -104,6 +112,19 @@ export interface Surface {
 
   /** Read a resolved control's text. Reading does not require control. */
   readonly read: (handle: TargetHandle) => Effect.Effect<string, SurfaceError>
+
+  /**
+   * Platform details about a resolved control, used when *recording* a step to
+   * build the ranked fallbacks — the legacy control name, an id, a centre point.
+   *
+   * Deliberately separate from `observe`: this is per-control and only needed at
+   * record time, so a discovery run pays for it once per acted-on control rather
+   * than for every node on every screen. A desktop adapter would return its own
+   * equivalents (automation id, control type) through the same shape.
+   */
+  readonly describe: (
+    handle: TargetHandle
+  ) => Effect.Effect<ElementDetail, SurfaceError>
 
   /** Raw image bytes. Redaction happens at the evidence boundary, not here. */
   readonly screenshot: () => Effect.Effect<Uint8Array, SurfaceError>

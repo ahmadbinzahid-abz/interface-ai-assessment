@@ -18,7 +18,10 @@
     "@workspace/eslint-config": "workspace:*",
     "@workspace/typescript-config": "workspace:*",
     "eslint": "^9",
-    "typescript": "^5"
+    "playwright": "^1.62.1",
+    "target-corebank": "workspace:*",
+    "typescript": "^5",
+    "vitest": "^4.1.11"
   },
   "dependencies": {
     "@google/genai": "^2.18.0",

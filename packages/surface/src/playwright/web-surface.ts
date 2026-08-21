@@ -18,6 +18,7 @@ import {
 import { buildPlan, resolveInObservation } from "../resolve.js"
 import type {
   Actor,
+  ElementDetail,
   ResolvedTarget,
   Surface,
   SurfaceCommand,
@@ -407,6 +408,84 @@ export const makeWebSurface = ({
           new InteractionFailed({ command: "read", detail: String(cause) }),
       })
 
+    /**
+     * Attributes and geometry for a resolved control, read once at record time.
+     *
+     * Both feed the ranked fallbacks: the legacy `name` attribute becomes the
+     * `controlName` strategy, and the box centre becomes the coordinate strategy
+     * of last resort.
+     */
+    const describe = (
+      handle: TargetHandle
+    ): Effect.Effect<ElementDetail, SurfaceError> =>
+      Effect.tryPromise({
+        try: async (): Promise<ElementDetail> => {
+          const viewport = page.viewportSize() ?? undefined
+
+          if (handle._tag === "point") {
+            return { attributes: {}, viewport }
+          }
+
+          if (handle._tag === "node") {
+            const { node } = await cdp.send("DOM.describeNode", {
+              backendNodeId: handle.platformHandle,
+            })
+
+            // CDP returns attributes as a flat [name, value, name, value] array.
+            const flat = node.attributes ?? []
+            const attributes: Record<string, string> = {}
+            for (let i = 0; i + 1 < flat.length; i += 2) {
+              const key = flat[i]
+              const value = flat[i + 1]
+              if (key !== undefined && value !== undefined)
+                attributes[key] = value
+            }
+
+            let bounds: ElementDetail["bounds"]
+            try {
+              const { model } = await cdp.send("DOM.getBoxModel", {
+                backendNodeId: handle.platformHandle,
+              })
+              // `content` is a quad: x1,y1,x2,y2,x3,y3,x4,y4.
+              const [x1, y1, x2, , , y3] = model.content
+              if (
+                x1 !== undefined &&
+                y1 !== undefined &&
+                x2 !== undefined &&
+                y3 !== undefined
+              ) {
+                bounds = { x: x1, y: y1, width: x2 - x1, height: y3 - y1 }
+              }
+            } catch {
+              // An element that is not rendered has no box. Not fatal — it just
+              // means no coordinate fallback gets recorded for this step.
+            }
+
+            return { attributes, bounds, viewport }
+          }
+
+          return withElement(handle, async (locator) => {
+            const attributes = await locator.evaluate((element) =>
+              Object.fromEntries(
+                Array.from((element as Element).attributes).map((attribute) => [
+                  attribute.name,
+                  attribute.value,
+                ])
+              )
+            )
+            const box = await locator.boundingBox()
+
+            return {
+              attributes: attributes as Record<string, string>,
+              bounds: box ?? undefined,
+              viewport,
+            }
+          })
+        },
+        catch: (cause) =>
+          new InteractionFailed({ command: "describe", detail: String(cause) }),
+      })
+
     const screenshot = (): Effect.Effect<Uint8Array, SurfaceError> =>
       Effect.tryPromise({
         try: async () => new Uint8Array(await page.screenshot({ type: "png" })),
@@ -416,7 +495,15 @@ export const makeWebSurface = ({
     const close = (): Effect.Effect<void> =>
       Effect.promise(() => cdp.detach().catch(() => undefined))
 
-    return { observe, resolve, act, read, screenshot, close } satisfies Surface
+    return {
+      observe,
+      resolve,
+      act,
+      read,
+      describe,
+      screenshot,
+      close,
+    } satisfies Surface
   })
 
 export { describeActor, describeHolder }

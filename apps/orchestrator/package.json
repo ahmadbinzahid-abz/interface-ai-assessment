@@ -28,7 +28,9 @@
     "@workspace/engine": "workspace:*",
     "@workspace/policy": "workspace:*",
     "@workspace/surface": "workspace:*",
+    "dotenv": "^17.4.2",
     "effect": "^3.22.1",
+    "playwright": "^1.62.1",
     "ws": "^8.21.3"
   }
 }

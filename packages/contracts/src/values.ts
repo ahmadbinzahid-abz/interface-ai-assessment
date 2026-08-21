@@ -46,7 +46,18 @@ export const ValueRef = Schema.Union(
   /** Resolved from the vault at replay time. Never persisted. */
   Schema.TaggedStruct("secret", { ref: Schema.String }),
   /** A value extracted by an earlier step in the same run. */
-  Schema.TaggedStruct("output", { name: Schema.String })
+  Schema.TaggedStruct("output", { name: Schema.String }),
+  /**
+   * A string that *embeds* references, written as `{{name}}`.
+   *
+   * Needed because not every parameterised value is the whole value. A discovery
+   * run that navigates to `/desk/member/12345` produces a URL which is mostly
+   * constant and partly the member id; recorded as a literal it silently pins the
+   * capability to one member, which is the precise failure the parameter
+   * mechanism exists to prevent. Placeholders are resolved at replay from the
+   * supplied inputs, earlier outputs, and the vault.
+   */
+  Schema.TaggedStruct("template", { text: Schema.String })
 )
 export type ValueRef = typeof ValueRef.Type
 

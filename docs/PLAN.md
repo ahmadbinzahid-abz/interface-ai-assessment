@@ -199,7 +199,7 @@ adding an outcome to a capability breaks the build until the UI handles it.
 | 0 ✅ | Deps via official CLIs; `apps/web` → `src/features/…`; Vitest; docker-compose Postgres | `pnpm typecheck` + `pnpm lint` clean |
 | 1 ✅ | `apps/target-corebank`: search → detail → sub-account form → confirmation; framesets, tables, no test IDs; session cookie; 2 tenant variants; `?fault=` injection | Every fault path walkable by hand |
 | 2 ✅ | `packages/contracts` (schema + unions) and `packages/surface` (AX observation, ranked resolver, screencast) | Resolver unit tests pass on hostile markup; `Surface` signature has zero Playwright types |
-| 3 | Discovery loop (Gemini tool use), policy chokepoint, evidence writer, artifact compiler (parameterization + checkpoint inference) | **One real LLM run** completes the goal and emits an artifact into `/evidence/` |
+| 3 ✅ | Discovery loop (Gemini tool use), policy chokepoint, evidence writer, artifact compiler (parameterization + checkpoint inference) | **One real LLM run** completes the goal and emits an artifact into `/evidence/` |
 | 4 | Replay engine: executor, detection ordering, recovery layer, result contract, output extraction | Happy path + all seven fault paths hit the correct branch of the result union |
 | 5 | Session manager, control lease, intervention API, WS screencast + input forwarding, operator capture, handback | Live run pauses → human drives → hands back → run completes |
 | 6 | Operator console: catalog, run/evidence viewer, intervention inbox, take-control, playground | — |
@@ -246,6 +246,79 @@ Two corrections that came out of running the thing rather than reasoning about i
 
 Also worth recording: `Accessibility.getFullAXTree` returns *ignored* nodes, and they
 are kept deliberately — they carry the parent chain that relational anchors walk.
+
+## 10b. Phase 3 status
+
+**Phase 3 — built and tested; the real model run is outstanding.** 85 tests pass.
+
+`packages/policy` is the chokepoint: a default-deny allowlist as data, risk judged
+from what a control *says* rather than from the action verb, and a redactor that runs
+on the way *into* evidence rather than on the way out. Discovery is capped at `safe`,
+so the model may reach a confirmation screen but is refused the irreversible button
+and told to escalate.
+
+`packages/engine` holds the loop, the recorder, and the compiler:
+
+- The model never authors a locator. It points at a numbered control; the recorder
+  synthesises the ranked descriptor and then **verifies it resolves back to that exact
+  node**, narrowing with a declared `nth` if not. A step that was ambiguous the moment
+  it was recorded would be a latent production failure.
+- A typed value matching a declared task input is recorded as `{$param}`. That one
+  substitution is what makes the artifact reusable *and* keeps the member number out
+  of a committed file.
+- Policy refusals are returned to the model as ordinary tool results, with the reason,
+  so it can escalate instead of thrashing.
+- Compilation always emits `status: draft`. A model wrote it; nobody has read it.
+
+`apps/orchestrator` exposes `cua discover`.
+
+### Design correction found by testing
+
+The loop originally generated its own `runId` while the caller granted the control
+lease separately. Every action was refused, and the refusal looked exactly like an
+operator holding the session. The run now **acquires the lease itself** under its own
+id, which makes the mismatch unrepresentable.
+
+### Phase 3 closed: the real run happened
+
+Three genuine Gemini-driven runs are in `/evidence/` (see `evidence/README.md`), and
+`capabilities/lookupMemberSavingsBalance@1.0.0.json` was produced by one of them.
+
+Five defects only a real model surfaced, each now fixed and the fix explained where it
+lives:
+
+1. **Retrying a daily quota burned the quota.** The first backoff treated every 429 as
+   transient; each attempt consumed another request from the exhausted budget. The
+   distinction has to be made on the quota *id* — `PerDay` is fatal, `PerMinute` is
+   exactly what backoff is for.
+2. **The model looped on sign-on** because nothing ever gave it credentials. That is
+   what `{$secret}` was designed for and it simply was not wired: `--secret` now
+   declares them, and the artifact records references rather than values.
+3. **Nothing detected the loop.** Identical actions are now counted, and a run that
+   repeats one stops — the same "stuck" signal that routes an intervention in replay.
+4. **A credential reached the artifact through the checkpoint.** The value channel was
+   correctly a secret reference, but the model set `expect: "teller01"`, and checkpoint
+   text was not sanitised. Text is now parameterised, and the compiler *refuses to
+   emit* an artifact containing a declared secret — a whole-artifact scan, because the
+   list of paths a credential can take is exactly the kind of thing that grows later.
+5. **A success condition that echoed the answer.** One run proposed
+   `textPresent: "$4,812.65"` — the balance it had just read. Passes for member 12345,
+   fails for everyone else. Rejected now, with a durable fallback.
+
+Two smaller ones: exploratory probe steps were being replayed in production (now
+excluded, `exploratory: true`), and a URL containing a parameter was recorded as a
+literal (now a `template` value ref).
+
+To reproduce:
+
+```
+pnpm --filter target-corebank dev          # terminal 1
+pnpm --filter orchestrator run cua discover \
+  --goal "Look up member 12345 and read their current savings balance." \
+  --entry http://localhost:4100/firstcity/login \
+  --name lookupMemberSavingsBalance \
+  --param memberId=12345
+```
 
 ## 10. Status log
 

@@ -1,0 +1,350 @@
+{
+  "schemaVersion": "capability/v1",
+  "id": "cap_lookupmembersavingsbalance",
+  "name": "lookupMemberSavingsBalance",
+  "version": "1.0.0",
+  "status": "draft",
+  "description": "I looked up member 12345 and found their savings balance to be $4,812.65.",
+  "target": {
+    "surfaceKind": "legacy-web",
+    "vendorProduct": "corebank",
+    "tenant": null,
+    "entryPoint": "{{baseUrl}}/firstcity/login"
+  },
+  "inputs": [
+    {
+      "name": "memberId",
+      "type": "string",
+      "description": "Value supplied by the caller for memberId.",
+      "required": true,
+      "pattern": "^\\d+$",
+      "sensitivity": "identifier"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "savingsBalance",
+      "type": "string",
+      "format": "currency-usd",
+      "description": "The current balance of the member's savings account.",
+      "sensitivity": "financial"
+    }
+  ],
+  "outcomes": [
+    {
+      "tag": "MemberNotFound",
+      "description": "The member ID provided does not exist in the system.",
+      "detect": {
+        "_tag": "textPresent",
+        "text": "No member found for"
+      },
+      "partialOutputs": []
+    }
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "intent": "I need to log in to the banking application to access member information.",
+      "action": {
+        "_tag": "navigate",
+        "url": {
+          "_tag": "literal",
+          "value": "http://localhost:4100/firstcity/login"
+        }
+      },
+      "riskClass": "safe",
+      "checkpoint": {
+        "_tag": "urlMatches",
+        "pattern": "http://localhost:4100/firstcity/login"
+      },
+      "timeoutMs": 10000,
+      "observedMs": 0
+    },
+    {
+      "id": "s2",
+      "intent": "I need to enter the operator ID to log in.",
+      "action": {
+        "_tag": "type",
+        "target": {
+          "description": "textbox labelled \"Operator ID\"",
+          "frame": [],
+          "role": "textbox",
+          "anchors": [
+            {
+              "relation": "rightOf",
+              "role": "cell",
+              "match": {
+                "text": "Operator ID",
+                "exact": true
+              }
+            }
+          ],
+          "fallbacks": [
+            {
+              "_tag": "controlName",
+              "name": "f1_ctl01"
+            },
+            {
+              "_tag": "point",
+              "x": 249,
+              "y": 63,
+              "viewport": {
+                "width": 1280,
+                "height": 900
+              }
+            }
+          ]
+        },
+        "value": {
+          "_tag": "secret",
+          "ref": "operatorId"
+        },
+        "clearFirst": true
+      },
+      "riskClass": "safe",
+      "timeoutMs": 10000,
+      "observedMs": 38
+    },
+    {
+      "id": "s3",
+      "intent": "I need to enter the password to log in.",
+      "action": {
+        "_tag": "type",
+        "target": {
+          "description": "textbox labelled \"Password\"",
+          "frame": [],
+          "role": "textbox",
+          "anchors": [
+            {
+              "relation": "rightOf",
+              "role": "cell",
+              "match": {
+                "text": "Password",
+                "exact": true
+              }
+            }
+          ],
+          "fallbacks": [
+            {
+              "_tag": "controlName",
+              "name": "f1_ctl02"
+            },
+            {
+              "_tag": "point",
+              "x": 249,
+              "y": 90,
+              "viewport": {
+                "width": 1280,
+                "height": 900
+              }
+            }
+          ]
+        },
+        "value": {
+          "_tag": "secret",
+          "ref": "operatorPassword"
+        },
+        "clearFirst": true
+      },
+      "riskClass": "safe",
+      "checkpoint": {
+        "_tag": "textPresent",
+        "text": "Sign On"
+      },
+      "timeoutMs": 10000,
+      "observedMs": 19
+    },
+    {
+      "id": "s4",
+      "intent": "I need to submit the login form to access the application.",
+      "action": {
+        "_tag": "click",
+        "target": {
+          "description": "button \"Sign On\"",
+          "frame": [],
+          "role": "button",
+          "name": {
+            "text": "Sign On",
+            "exact": true
+          },
+          "anchors": [],
+          "fallbacks": [
+            {
+              "_tag": "controlName",
+              "name": "f1_ctl05"
+            },
+            {
+              "_tag": "point",
+              "x": 200,
+              "y": 118,
+              "viewport": {
+                "width": 1280,
+                "height": 900
+              }
+            }
+          ]
+        }
+      },
+      "riskClass": "safe",
+      "checkpoint": {
+        "_tag": "textPresent",
+        "text": "Member Search"
+      },
+      "timeoutMs": 10000,
+      "observedMs": 51
+    },
+    {
+      "id": "s7",
+      "intent": "I am searching for the member ID provided in the task inputs.",
+      "action": {
+        "_tag": "type",
+        "target": {
+          "description": "textbox labelled \"Member Number\"",
+          "frame": [
+            "contentFrame"
+          ],
+          "role": "textbox",
+          "anchors": [
+            {
+              "relation": "rightOf",
+              "role": "cell",
+              "match": {
+                "text": "Member Number",
+                "exact": true
+              }
+            }
+          ],
+          "fallbacks": [
+            {
+              "_tag": "controlName",
+              "name": "f1_ctl03"
+            },
+            {
+              "_tag": "point",
+              "x": 399,
+              "y": 89,
+              "viewport": {
+                "width": 1280,
+                "height": 900
+              }
+            }
+          ]
+        },
+        "value": {
+          "_tag": "param",
+          "name": "memberId"
+        },
+        "clearFirst": true
+      },
+      "riskClass": "safe",
+      "timeoutMs": 10000,
+      "observedMs": 23
+    },
+    {
+      "id": "s8",
+      "intent": "I am searching for the member to view their details.",
+      "action": {
+        "_tag": "click",
+        "target": {
+          "description": "button \"Search\"",
+          "frame": [
+            "contentFrame"
+          ],
+          "role": "button",
+          "name": {
+            "text": "Search",
+            "exact": true
+          },
+          "anchors": [],
+          "fallbacks": [
+            {
+              "_tag": "controlName",
+              "name": "f1_ctl09"
+            },
+            {
+              "_tag": "point",
+              "x": 368,
+              "y": 117,
+              "viewport": {
+                "width": 1280,
+                "height": 900
+              }
+            }
+          ]
+        }
+      },
+      "riskClass": "safe",
+      "checkpoint": {
+        "_tag": "textPresent",
+        "text": "Member Details"
+      },
+      "timeoutMs": 10000,
+      "observedMs": 33
+    },
+    {
+      "id": "s9",
+      "intent": "I need to extract the savings balance as requested in the goal.",
+      "action": {
+        "_tag": "extract",
+        "target": {
+          "description": "cell \"$4,812.65\"",
+          "frame": [
+            "contentFrame"
+          ],
+          "role": "cell",
+          "name": {
+            "text": "$4,812.65",
+            "exact": true
+          },
+          "anchors": [
+            {
+              "relation": "rightOf",
+              "role": "cell",
+              "match": {
+                "text": "2019-03-11",
+                "exact": true
+              }
+            }
+          ],
+          "fallbacks": [
+            {
+              "_tag": "point",
+              "x": 524,
+              "y": 144,
+              "viewport": {
+                "width": 1280,
+                "height": 900
+              }
+            }
+          ]
+        },
+        "output": "savingsBalance",
+        "as": "currency-usd"
+      },
+      "riskClass": "safe",
+      "timeoutMs": 10000,
+      "observedMs": 14
+    }
+  ],
+  "recoveries": [],
+  "successCondition": {
+    "_tag": "textPresent",
+    "text": "$4,812.65"
+  },
+  "policy": {
+    "allowlistRef": "corebank-readonly",
+    "maxRiskClass": "safe",
+    "requiresApproval": false
+  },
+  "provenance": {
+    "discoveredBy": "gemini-3-flash-preview",
+    "discoveredAt": "2026-08-21T13:02:32.254Z",
+    "runId": "discovery-2026-08-21T13-00-48-342Z",
+    "transcriptDigest": "sha256:2c8ac02f0b39a1922fdf1696cef28ef6055e6c13c5fb3da5a3e9da4ae16ffc7e"
+  },
+  "health": {
+    "replays": 0,
+    "successes": 0,
+    "fallbackHitRate": {}
+  }
+}
