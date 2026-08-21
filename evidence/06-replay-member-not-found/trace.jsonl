@@ -1,0 +1,33 @@
+{"at":"2026-08-21T14:31:27.263Z","kind":"ReplayStarted","runId":"replay-2026-08-21T14-31-27-262Z","capability":"lookupMemberSavingsBalance@1.0.0","status":"draft","inputs":["memberId"]}
+{"at":"2026-08-21T14:31:27.265Z","_tag":"StepStarted","stepId":"s1","intent":"I need to navigate to the login page to start the member lookup process."}
+{"at":"2026-08-21T14:31:27.281Z","_tag":"PolicyDecision","stepId":"s1","decision":"Allow"}
+{"at":"2026-08-21T14:31:27.300Z","_tag":"ActionPerformed","stepId":"s1","action":"navigate","durationMs":18}
+{"at":"2026-08-21T14:31:27.318Z","_tag":"CheckpointPassed","stepId":"s1"}
+{"at":"2026-08-21T14:31:27.319Z","_tag":"StepStarted","stepId":"s2","intent":"Entering the operator ID to begin the login process."}
+{"at":"2026-08-21T14:31:27.326Z","_tag":"PolicyDecision","stepId":"s2","decision":"Allow"}
+{"at":"2026-08-21T14:31:27.333Z","_tag":"TargetResolved","stepId":"s2","resolution":{"strategy":{"_tag":"anchor","index":0},"rank":0,"matchCount":1}}
+{"at":"2026-08-21T14:31:27.373Z","_tag":"ActionPerformed","stepId":"s2","action":"type","durationMs":39}
+{"at":"2026-08-21T14:31:27.409Z","_tag":"CheckpointPassed","stepId":"s2"}
+{"at":"2026-08-21T14:31:27.410Z","_tag":"StepStarted","stepId":"s3","intent":"Entering the operator password to complete the login process."}
+{"at":"2026-08-21T14:31:27.416Z","_tag":"PolicyDecision","stepId":"s3","decision":"Allow"}
+{"at":"2026-08-21T14:31:27.422Z","_tag":"TargetResolved","stepId":"s3","resolution":{"strategy":{"_tag":"anchor","index":0},"rank":0,"matchCount":1}}
+{"at":"2026-08-21T14:31:27.440Z","_tag":"ActionPerformed","stepId":"s3","action":"type","durationMs":17}
+{"at":"2026-08-21T14:31:27.464Z","_tag":"CheckpointPassed","stepId":"s3"}
+{"at":"2026-08-21T14:31:27.464Z","_tag":"StepStarted","stepId":"s4","intent":"Clicking the Sign On button to access the main dashboard."}
+{"at":"2026-08-21T14:31:27.470Z","_tag":"PolicyDecision","stepId":"s4","decision":"Allow"}
+{"at":"2026-08-21T14:31:27.476Z","_tag":"TargetResolved","stepId":"s4","resolution":{"strategy":{"_tag":"roleAndName"},"rank":0,"matchCount":1}}
+{"at":"2026-08-21T14:31:27.554Z","_tag":"ActionPerformed","stepId":"s4","action":"click","durationMs":77}
+{"at":"2026-08-21T14:31:27.587Z","_tag":"CheckpointPassed","stepId":"s4"}
+{"at":"2026-08-21T14:31:27.588Z","_tag":"StepStarted","stepId":"s5","intent":"Entering the member ID to search for the member."}
+{"at":"2026-08-21T14:31:27.598Z","_tag":"PolicyDecision","stepId":"s5","decision":"Allow"}
+{"at":"2026-08-21T14:31:27.608Z","_tag":"TargetResolved","stepId":"s5","resolution":{"strategy":{"_tag":"anchor","index":0},"rank":0,"matchCount":1}}
+{"at":"2026-08-21T14:31:27.643Z","_tag":"ActionPerformed","stepId":"s5","action":"type","durationMs":34}
+{"at":"2026-08-21T14:31:27.685Z","_tag":"CheckpointPassed","stepId":"s5"}
+{"at":"2026-08-21T14:31:27.686Z","_tag":"StepStarted","stepId":"s6","intent":"Clicking the Search button to retrieve the member's information."}
+{"at":"2026-08-21T14:31:27.696Z","_tag":"PolicyDecision","stepId":"s6","decision":"Allow"}
+{"at":"2026-08-21T14:31:27.706Z","_tag":"TargetResolved","stepId":"s6","resolution":{"strategy":{"_tag":"roleAndName"},"rank":0,"matchCount":1}}
+{"at":"2026-08-21T14:31:27.775Z","_tag":"ActionPerformed","stepId":"s6","action":"click","durationMs":69}
+{"at":"2026-08-21T14:31:28.621Z","_tag":"StepStarted","stepId":"s7","intent":"Extracting the savings balance for the member."}
+{"at":"2026-08-21T14:31:28.633Z","_tag":"PolicyDecision","stepId":"s7","decision":"Allow"}
+{"at":"2026-08-21T14:31:28.645Z","_tag":"TargetResolved","stepId":"s7","resolution":{"strategy":{"_tag":"fallback","index":0,"kind":"point"},"rank":1,"matchCount":1}}
+{"at":"2026-08-21T14:31:28.689Z","kind":"EvidenceCaptured","kind_":"screenshot","ref":"C:\\Users\\Ahmad\\Desktop\\interface-ai-assessment\\evidence\\replay-2026-08-21T14-31-27-258Z\\failure-s7.png"}

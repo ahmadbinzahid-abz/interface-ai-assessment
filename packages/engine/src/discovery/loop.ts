@@ -84,6 +84,9 @@ export interface DiscoveryRequest {
 
 const CHANGES_SCREEN = new Set(["navigate", "click", "type", "select"])
 
+/** How long to wait for the screen to stop changing before reading it. */
+const SETTLE_TIMEOUT_MS = 3_000
+
 export const runDiscovery = (
   { surface, model, evidence, allowlist, lease }: DiscoveryDeps,
   request: DiscoveryRequest
@@ -138,12 +141,43 @@ export const runDiscovery = (
 
     // ── Helpers ────────────────────────────────────────────────────────────
 
-    const observeAndRender = Effect.gen(function* () {
+    const observeOnce = Effect.gen(function* () {
       const observation = yield* surface
         .observe()
         .pipe(Effect.catchAll(() => Effect.succeed(undefined)))
       if (!observation) return undefined
       return { observation, rendered: renderObservation(observation) }
+    })
+
+    /**
+     * Observe once the screen has stopped changing.
+     *
+     * An action that navigates has not finished when `act` returns, so reading
+     * immediately shows the model the page it was just on — which is both
+     * confusing to the model and a source of flaky recordings. Rather than
+     * sleeping a fixed amount, the view is read until two consecutive reads
+     * agree, which costs nothing on a page that is already still.
+     */
+    const observeAndRender = Effect.gen(function* () {
+      const deadline = Date.now() + SETTLE_TIMEOUT_MS
+      let previous = yield* observeOnce
+
+      while (Date.now() < deadline) {
+        yield* Effect.sleep("120 millis")
+        const current = yield* observeOnce
+
+        if (
+          current &&
+          previous &&
+          current.rendered.text === previous.rendered.text
+        ) {
+          return current
+        }
+
+        previous = current
+      }
+
+      return previous
     })
 
     /**
@@ -281,6 +315,7 @@ export const runDiscovery = (
           call,
           view,
           current,
+          observeAfter: observeAndRender,
           surface,
           actor,
           allowlist,
@@ -394,6 +429,11 @@ interface HandleCallArgs {
   }
   readonly view: RenderedObservation
   readonly current: Observation | undefined
+  /** Re-read the screen once it has settled, to check what the step claimed. */
+  readonly observeAfter: Effect.Effect<
+    { observation: Observation; rendered: RenderedObservation } | undefined,
+    never
+  >
   readonly surface: Surface
   readonly actor: Actor
   readonly allowlist: AllowlistConfig
@@ -416,6 +456,7 @@ const handleCall = (args: HandleCallArgs): Effect.Effect<CallOutcome, never> =>
       call,
       view,
       current,
+      observeAfter,
       surface,
       actor,
       allowlist,
@@ -574,11 +615,18 @@ const handleCall = (args: HandleCallArgs): Effect.Effect<CallOutcome, never> =>
           observation: current,
           framePath: control.framePath,
           node: control.node,
-          description: control.name
-            ? `${control.role} "${control.name}"`
-            : control.label
-              ? `${control.role} labelled "${control.label}"`
-              : `${control.role} #${ref}`,
+          // Reading a cell for its value must not identify it *by* that value.
+          identifiesByValue: kind === "extract",
+          description:
+            kind === "extract"
+              ? // Named for what it yields, not for what it currently says: the
+                // value is the answer and will differ on the next invocation.
+                `${control.role} holding ${String(call.args["output"] ?? "the value")}`
+              : control.name
+                ? `${control.role} "${control.name}"`
+                : control.label
+                  ? `${control.role} labelled "${control.label}"`
+                  : `${control.role} #${ref}`,
         }
 
         // Resolve through the real ranked pipeline rather than acting on the raw
@@ -694,36 +742,50 @@ const handleCall = (args: HandleCallArgs): Effect.Effect<CallOutcome, never> =>
               : { _tag: "select", target: descriptor, value: asValueRef(value) }
 
         /**
-         * A typed field gets a checkpoint whether or not the model supplied one:
-         * assert the control now holds what we just typed.
+         * Check the model's expectation against the screen it actually produced.
          *
-         * This is the cheapest possible instance of the rule that a step must
-         * never assume its action worked. Fields silently reject input all the
-         * time — maxlength truncation, a masked control, focus stolen by script —
-         * and without this the failure only surfaces several steps later as a
-         * confusing "record not found".
+         * A model will confidently name a heading that does not exist — one real
+         * run expected "Savings Balance" on a page whose column reads "Current
+         * Balance". Recording that as a checkpoint bakes a guaranteed failure
+         * into the capability, and the failure surfaces much later, in
+         * production, looking like drift.
+         *
+         * So an expectation that is not visible right now is not recorded, and
+         * the model is told, which gives it the chance to supply a real one.
          */
-        const autoCheckpoint: Condition | undefined =
-          kind === "type"
-            ? {
-                _tag: "valueEquals",
-                target: descriptor,
-                expected: asValueRef(value),
-              }
+        const after = yield* observeAfter
+        const expected = call.args["expect"]
+        const expectedText =
+          typeof expected === "string" && expected.trim().length > 0
+            ? expected.trim()
             : undefined
+
+        const expectationHolds =
+          expectedText === undefined ||
+          (after?.rendered.text ?? "")
+            .toLowerCase()
+            .includes(expectedText.toLowerCase())
 
         record({
           intent: String(call.args["why"] ?? `${kind} ${label}`),
           action,
           riskClass: decision.riskClass,
-          checkpoint: checkpointFor(call.args["expect"]) ?? autoCheckpoint,
+          checkpoint: expectationHolds ? checkpointFor(expected) : undefined,
           observedMs: Date.now() - startedAt,
           resolvedAtRank: resolved.right.resolution.rank,
           exploratory: call.args["exploratory"] === true,
         })
 
         return {
-          response: { ok: true },
+          response: expectationHolds
+            ? { ok: true }
+            : {
+                ok: true,
+                warning:
+                  `The step worked, but "${expectedText}" is not on the resulting screen, so it ` +
+                  "was not recorded as a check. Look at the screen below and, if this step needs " +
+                  "verifying, name something that is actually there.",
+              },
           changedScreen: true,
           fingerprint: `${kind}:${label}:${value}`,
         }

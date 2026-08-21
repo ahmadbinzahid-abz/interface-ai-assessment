@@ -16,6 +16,7 @@
   "devDependencies": {
     "@types/node": "^20.19.41",
     "@workspace/eslint-config": "workspace:*",
+    "@workspace/surface": "workspace:*",
     "@workspace/typescript-config": "workspace:*",
     "eslint": "^9",
     "playwright": "^1.62.1",
@@ -27,7 +28,6 @@
     "@google/genai": "^2.18.0",
     "@workspace/contracts": "workspace:*",
     "@workspace/policy": "workspace:*",
-    "@workspace/surface": "workspace:*",
     "effect": "^3.22.1"
   }
 }

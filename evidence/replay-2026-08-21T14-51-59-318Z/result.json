@@ -1,0 +1,227 @@
+{
+  "_tag": "Succeeded",
+  "summary": {
+    "runId": "replay-2026-08-21T14-51-59-322Z",
+    "capabilityId": "cap_lookupmembersavingsbalance",
+    "capabilityVersion": "1.0.0",
+    "tenant": null,
+    "startedAt": "2026-08-21T14:51:59.322Z",
+    "durationMs": 2077,
+    "stepsAttempted": 7,
+    "evidenceRef": "C:\\Users\\Ahmad\\Desktop\\interface-ai-assessment\\evidence\\replay-2026-08-21T14-51-59-318Z"
+  },
+  "outputs": {
+    "savingsBalance": "$4,812.65"
+  },
+  "trace": [
+    {
+      "_tag": "StepStarted",
+      "stepId": "s1",
+      "intent": "I need to navigate to the login page to start the member lookup process.",
+      "at": "2026-08-21T14:51:59.324Z"
+    },
+    {
+      "_tag": "PolicyDecision",
+      "stepId": "s1",
+      "decision": "Allow"
+    },
+    {
+      "_tag": "ActionPerformed",
+      "stepId": "s1",
+      "action": "navigate",
+      "durationMs": 20
+    },
+    {
+      "_tag": "CheckpointPassed",
+      "stepId": "s1"
+    },
+    {
+      "_tag": "StepStarted",
+      "stepId": "s2",
+      "intent": "Entering the operator ID to begin the login process.",
+      "at": "2026-08-21T14:51:59.380Z"
+    },
+    {
+      "_tag": "PolicyDecision",
+      "stepId": "s2",
+      "decision": "Allow"
+    },
+    {
+      "_tag": "TargetResolved",
+      "stepId": "s2",
+      "resolution": {
+        "strategy": {
+          "_tag": "anchor",
+          "index": 0
+        },
+        "rank": 0,
+        "matchCount": 1
+      }
+    },
+    {
+      "_tag": "ActionPerformed",
+      "stepId": "s2",
+      "action": "type",
+      "durationMs": 40
+    },
+    {
+      "_tag": "CheckpointPassed",
+      "stepId": "s2"
+    },
+    {
+      "_tag": "StepStarted",
+      "stepId": "s3",
+      "intent": "Entering the operator password to complete the login process.",
+      "at": "2026-08-21T14:51:59.471Z"
+    },
+    {
+      "_tag": "PolicyDecision",
+      "stepId": "s3",
+      "decision": "Allow"
+    },
+    {
+      "_tag": "TargetResolved",
+      "stepId": "s3",
+      "resolution": {
+        "strategy": {
+          "_tag": "anchor",
+          "index": 0
+        },
+        "rank": 0,
+        "matchCount": 1
+      }
+    },
+    {
+      "_tag": "ActionPerformed",
+      "stepId": "s3",
+      "action": "type",
+      "durationMs": 15
+    },
+    {
+      "_tag": "CheckpointPassed",
+      "stepId": "s3"
+    },
+    {
+      "_tag": "StepStarted",
+      "stepId": "s4",
+      "intent": "Clicking the Sign On button to access the main dashboard.",
+      "at": "2026-08-21T14:51:59.519Z"
+    },
+    {
+      "_tag": "PolicyDecision",
+      "stepId": "s4",
+      "decision": "Allow"
+    },
+    {
+      "_tag": "TargetResolved",
+      "stepId": "s4",
+      "resolution": {
+        "strategy": {
+          "_tag": "roleAndName"
+        },
+        "rank": 0,
+        "matchCount": 1
+      }
+    },
+    {
+      "_tag": "ActionPerformed",
+      "stepId": "s4",
+      "action": "click",
+      "durationMs": 43
+    },
+    {
+      "_tag": "CheckpointPassed",
+      "stepId": "s4"
+    },
+    {
+      "_tag": "StepStarted",
+      "stepId": "s5",
+      "intent": "Entering the member ID to search for the member.",
+      "at": "2026-08-21T14:51:59.600Z"
+    },
+    {
+      "_tag": "PolicyDecision",
+      "stepId": "s5",
+      "decision": "Allow"
+    },
+    {
+      "_tag": "TargetResolved",
+      "stepId": "s5",
+      "resolution": {
+        "strategy": {
+          "_tag": "anchor",
+          "index": 0
+        },
+        "rank": 0,
+        "matchCount": 1
+      }
+    },
+    {
+      "_tag": "ActionPerformed",
+      "stepId": "s5",
+      "action": "type",
+      "durationMs": 33
+    },
+    {
+      "_tag": "CheckpointPassed",
+      "stepId": "s5"
+    },
+    {
+      "_tag": "StepStarted",
+      "stepId": "s6",
+      "intent": "Clicking the Search button to retrieve the member's information.",
+      "at": "2026-08-21T14:51:59.700Z"
+    },
+    {
+      "_tag": "PolicyDecision",
+      "stepId": "s6",
+      "decision": "Allow"
+    },
+    {
+      "_tag": "TargetResolved",
+      "stepId": "s6",
+      "resolution": {
+        "strategy": {
+          "_tag": "roleAndName"
+        },
+        "rank": 0,
+        "matchCount": 1
+      }
+    },
+    {
+      "_tag": "ActionPerformed",
+      "stepId": "s6",
+      "action": "click",
+      "durationMs": 56
+    },
+    {
+      "_tag": "StepStarted",
+      "stepId": "s7",
+      "intent": "Extracting the savings balance for the member.",
+      "at": "2026-08-21T14:52:00.550Z"
+    },
+    {
+      "_tag": "PolicyDecision",
+      "stepId": "s7",
+      "decision": "Allow"
+    },
+    {
+      "_tag": "TargetResolved",
+      "stepId": "s7",
+      "resolution": {
+        "strategy": {
+          "_tag": "anchor",
+          "index": 0
+        },
+        "rank": 0,
+        "matchCount": 2
+      }
+    },
+    {
+      "_tag": "ActionPerformed",
+      "stepId": "s7",
+      "action": "extract",
+      "durationMs": 31
+    }
+  ]
+}

@@ -6,6 +6,8 @@ import { config as loadEnv } from "dotenv"
 
 import { REPO_ROOT } from "../paths.js"
 import { discover } from "./discover.js"
+import { recompile } from "./recompile.js"
+import { replay } from "./replay.js"
 
 // A model API key belongs in an untracked file, not in shell history.
 loadEnv({ path: join(REPO_ROOT, ".env"), quiet: true })
@@ -35,7 +37,29 @@ const USAGE = `cua — computer-use automation
     --headed    Show the browser.
     --max-turns Stop after this many model turns. Default 30.
 
-  Requires GEMINI_API_KEY. Replay does not.
+  Requires GEMINI_API_KEY.
+
+  cua replay --capability <name@version> [options]
+
+    --capability  File in capabilities/, without the .json — e.g.
+                  lookupMemberSavingsBalance@1.0.0
+    --input       name=value, repeatable.
+    --base-url    Which institution's install to run against. Substituted for
+                  {{baseUrl}}. Default http://localhost:4100
+    --headed      Show the browser.
+    --update-health  Write replay telemetry back into the artifact.
+
+    No model, no API key. Secrets come from CUA_SECRET_<NAME> in the
+    environment or .env — never from the artifact.
+
+    Exit codes: 0 succeeded, 1 failed, 2 escalated, 3 business outcome.
+
+  cua recompile --run <evidence/…/run.json> --name <capabilityName> [options]
+
+    Re-emit an artifact from a saved recording, through the current compiler.
+    No model is called. Takes the same --param/--secret/--entry/--version
+    flags as discover, because parameter values are supplied rather than
+    stored — the recording deliberately does not contain them.
 `
 
 /**
@@ -69,6 +93,80 @@ const main = async (): Promise<number> => {
   if (!command || command === "help" || command === "--help") {
     console.log(USAGE)
     return command ? 0 : 1
+  }
+
+  if (command === "recompile") {
+    const { values } = parseArgs({
+      args: rest,
+      options: {
+        run: { type: "string" },
+        name: { type: "string" },
+        entry: {
+          type: "string",
+          default: "http://localhost:4100/firstcity/login",
+        },
+        param: { type: "string", multiple: true },
+        secret: { type: "string", multiple: true },
+        version: { type: "string", default: "1.0.0" },
+        product: { type: "string", default: "corebank" },
+      },
+      strict: true,
+    })
+
+    const missing = (["run", "name"] as const).filter((key) => !values[key])
+    if (missing.length > 0) {
+      console.error(`Missing required option(s): ${missing.map((k) => `--${k}`).join(", ")}
+`)
+      console.log(USAGE)
+      return 1
+    }
+
+    return recompile({
+      runFile: values.run as string,
+      name: values.name as string,
+      version: values.version as string,
+      vendorProduct: values.product as string,
+      entryPoint: values.entry as string,
+      parameters: [
+        ...(values.param ?? []).map((raw) => parseParameter(raw)),
+        ...(values.secret ?? []).map((raw) => parseParameter(raw, true)),
+      ],
+    })
+  }
+
+  if (command === "replay") {
+    const { values } = parseArgs({
+      args: rest,
+      options: {
+        capability: { type: "string" },
+        input: { type: "string", multiple: true },
+        "base-url": { type: "string", default: "http://localhost:4100" },
+        headed: { type: "boolean", default: false },
+        "update-health": { type: "boolean", default: false },
+      },
+      strict: true,
+    })
+
+    if (!values.capability) {
+      console.error("Missing required option: --capability\n")
+      console.log(USAGE)
+      return 1
+    }
+
+    return replay({
+      capability: values.capability,
+      inputs: Object.fromEntries(
+        (values.input ?? []).map((raw) => {
+          const index = raw.indexOf("=")
+          if (index <= 0)
+            throw new Error(`--input expects name=value, got "${raw}"`)
+          return [raw.slice(0, index), raw.slice(index + 1)]
+        })
+      ),
+      baseUrl: values["base-url"] as string,
+      headed: values.headed as boolean,
+      updateHealth: values["update-health"] as boolean,
+    })
   }
 
   if (command !== "discover") {

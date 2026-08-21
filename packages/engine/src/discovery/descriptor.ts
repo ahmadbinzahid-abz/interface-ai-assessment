@@ -7,7 +7,11 @@ import {
   type NodeBounds,
   type Observation,
 } from "@workspace/contracts"
-import { normalizeRole, resolveInObservation } from "@workspace/surface"
+import {
+  matchesText,
+  normalizeRole,
+  resolveInObservation,
+} from "@workspace/surface"
 
 /**
  * Turning "the model acted on *that* control" into a durable descriptor.
@@ -79,35 +83,68 @@ const ancestorCell = (
  * sibling cell carrying text. Recording the *relation* rather than the label's
  * coordinates is what makes the descriptor survive a tenant adding a column.
  */
-export const inferAnchor = (
+export const inferAnchors = (
   frame: FrameObservation,
   node: AxNode
-): Anchor | undefined => {
+): readonly Anchor[] => {
   const byId = indexOf(frame)
 
   const cell = ancestorCell(byId, node)
-  if (!cell) return undefined
+  if (!cell) return []
 
   const row = parentOf(byId, cell)
-  if (!row) return undefined
+  if (!row) return []
 
   const cells = row.childIds
     .map((id) => byId.get(id))
     .filter((child): child is AxNode => child !== undefined)
 
   const position = cells.findIndex((candidate) => candidate.id === cell.id)
-  if (position <= 0) return undefined
+  if (position <= 0) return []
+
+  const anchors: Anchor[] = []
 
   for (let i = position - 1; i >= 0; i--) {
     const candidate = cells[i]
     const text = candidate?.name.trim()
     if (candidate && text) {
-      return { relation: "rightOf", role: "cell", match: { text, exact: true } }
+      anchors.push({
+        relation: "rightOf",
+        role: "cell",
+        match: { text, exact: true },
+      })
     }
   }
 
-  return undefined
+  /**
+   * Prefer an anchor that is itself unique on the page.
+   *
+   * Nearest-first is the obvious ordering and the wrong one. In an accounts
+   * table the cell immediately left of a balance is the opening date, which
+   * every account opened that day shares; the account number two cells over
+   * occurs once. Both can be made to resolve by adding an `nth`, so uniqueness
+   * of the *anchor* is what separates a landmark from a coincidence — and it is
+   * what keeps the descriptor working when a row is added above.
+   */
+  const occurrences = (anchor: Anchor): number =>
+    frame.nodes.filter(
+      (candidate) =>
+        (!anchor.role || normalizeRole(candidate.role) === anchor.role) &&
+        matchesText(candidate.name, anchor.match)
+    ).length
+
+  return [...anchors].sort((a, b) => {
+    const uniqueA = occurrences(a) === 1 ? 0 : 1
+    const uniqueB = occurrences(b) === 1 ? 0 : 1
+    return uniqueA - uniqueB
+  })
 }
+
+/** The nearest labelled cell to the left, for rendering a control's label. */
+export const inferAnchor = (
+  frame: FrameObservation,
+  node: AxNode
+): Anchor | undefined => inferAnchors(frame, node)[0]
 
 export interface SynthesisInput {
   readonly observation: Observation
@@ -119,6 +156,16 @@ export interface SynthesisInput {
   readonly attributes?: Record<string, string>
   readonly bounds?: NodeBounds
   readonly viewport?: { readonly width: number; readonly height: number }
+  /**
+   * Set when the control is being read *for its value* rather than acted on.
+   *
+   * A balance cell reads "$4,812.65" today, so naming it that identifies the
+   * answer rather than the control, and the capability would only ever resolve
+   * for a member whose balance happens to match. The name is dropped — but only
+   * if an anchor can be found that still resolves to exactly this node, which is
+   * checkable here because the page is in front of us.
+   */
+  readonly identifiesByValue?: boolean
 }
 
 /**
@@ -132,6 +179,7 @@ export const synthesizeDescriptor = ({
   attributes,
   bounds,
   viewport,
+  identifiesByValue = false,
 }: SynthesisInput): TargetDescriptor => {
   const frame = observation.frames.find(
     (candidate) =>
@@ -141,7 +189,7 @@ export const synthesizeDescriptor = ({
 
   const role = asControlRole(node.role)
   const name = node.name.trim()
-  const anchor = frame ? inferAnchor(frame, node) : undefined
+  const anchorCandidates = frame ? inferAnchors(frame, node) : []
 
   const fallbacks: TargetDescriptor["fallbacks"][number][] = []
 
@@ -168,16 +216,60 @@ export const synthesizeDescriptor = ({
     })
   }
 
-  const base = new TargetDescriptor({
-    description,
-    frame: framePath,
-    role,
-    name: name.length > 0 ? { text: name, exact: true } : undefined,
-    anchors: anchor ? [anchor] : [],
-    fallbacks,
-  })
+  const build = (anchors: readonly Anchor[]) =>
+    new TargetDescriptor({
+      description,
+      frame: framePath,
+      role,
+      name: name.length > 0 ? { text: name, exact: true } : undefined,
+      anchors,
+      fallbacks,
+    })
 
-  return disambiguate(observation, base, node.id)
+  /**
+   * Prefer an anchor that identifies the control on its own.
+   *
+   * Each candidate is tried against the observation the step was recorded from,
+   * and the first that resolves to exactly this node wins. That is what turns
+   * "the cell right of the opening date" — which matches every row opened that
+   * day — into "the cell right of account number S-0001-12345", which matches
+   * one. Doing this here rather than in the compiler matters: the page is in
+   * front of us, so the choice can be *verified* instead of guessed.
+   */
+  const resolvesToThisNode = (candidate: TargetDescriptor): boolean => {
+    const resolved = resolveInObservation(observation, candidate)
+    return resolved._tag === "resolved" && resolved.node.id === node.id
+  }
+
+  // An extraction target identified without its value, if that still works.
+  if (identifiesByValue) {
+    for (const anchor of anchorCandidates) {
+      const base = new TargetDescriptor({
+        description,
+        frame: framePath,
+        role,
+        anchors: [anchor],
+        fallbacks,
+      })
+
+      /**
+       * `rightOf` means every cell to the right, not the next one, so anchoring
+       * a balance on its account number legitimately matches two cells — the
+       * date and the balance. That is declared ambiguity, and `nth` is how the
+       * schema expresses it, so the same narrowing used elsewhere applies here
+       * before the candidate is judged.
+       */
+      const candidate = disambiguate(observation, base, node.id)
+      if (resolvesToThisNode(candidate)) return candidate
+    }
+  }
+
+  for (const anchor of anchorCandidates) {
+    const candidate = build([anchor])
+    if (resolvesToThisNode(candidate)) return candidate
+  }
+
+  return disambiguate(observation, build(anchorCandidates.slice(0, 1)), node.id)
 }
 
 /**

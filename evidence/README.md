@@ -1,52 +1,40 @@
 # Evidence
 
-Every run here is a real Gemini-driven run against the live stand-in application
-(`apps/target-corebank`). Nothing is simulated, and nothing has been edited by hand.
+Every run here is real, against the live stand-in application
+(`apps/target-corebank`). The discovery runs called Gemini; the replay runs
+called nothing at all. Nothing has been edited by hand.
 
-Each run directory contains:
+Each directory contains:
 
 | File | What it is |
 |---|---|
-| `trace.jsonl` | The structured log: what the agent did, **why** it did it, what policy decided, and which locator strategy resolved. Written through the redactor, so declared sensitive values never reach it. |
-| `run.json` | The raw recording, so an artifact can be re-compiled after a compiler change without paying for another model run. |
-| `capability.json` | The compiled capability, as emitted by that run. |
+| `trace.jsonl` | The structured log: what happened, **why** — each step's intent — what policy decided, and which locator strategy resolved. Written through the redactor, so declared sensitive values never reach it. |
+| `run.json` | The raw recording (discovery), so an artifact can be re-compiled after a compiler change without paying for another model run. |
+| `result.json` | The full typed result (replay). |
+| `capability.json` | The compiled capability, as that run emitted it. |
+| `failure-*.png` | Screenshot captured at the point of failure. |
 
-Discovery replays are not here yet — that is Phase 4.
+## The through-line, in order
 
-## The runs
+### 01 — discovery produces the capability
 
-### `discovery-2026-08-21T13-12-46-021Z` — the shipped capability
-
-`gemini-3.1-flash-lite`, completed in 9 turns. This run produced
+`gemini-3.1-flash-lite`, 8 turns. Produced
 `capabilities/lookupMemberSavingsBalance@1.0.0.json`.
 
-Worth looking at in the artifact:
+Worth checking in the artifact:
 
-- The operator credentials are `{$secret}` references. Grepping the artifact for
-  `teller01` or `demo-pass` returns nothing.
-- The member number is a `{$param}`, so the capability works for any member.
-- Step 7's URL became a `template` —
-  `http://localhost:4100/firstcity/desk/member/{{memberId}}` — rather than a literal
-  containing `12345`. Recorded as a literal it would have pinned the capability to
-  one member forever.
-- The success condition is `urlMatches` on that same parameterised pattern.
+- Operator credentials are `{$secret}` references. Grep for `teller01` or
+  `demo-pass` and you get nothing.
+- The member number is a `{$param}`.
+- The balance cell is targeted as *"the cell right of account number
+  `S-0001-{{memberId}}`, second one"* — **not** by the balance it happened to
+  read. That distinction is what makes 05 possible.
 
-### `discovery-2026-08-21T13-09-36-470Z-escalated` — escalation, unprompted
+### 02 — discovery declares a business outcome
 
-`gemini-3.5-flash-lite`. This weaker model could not get past sign-on, retried,
-and then **called `escalate`** rather than thrashing or inventing a workaround:
-
-> "Authentication failed with the provided operator credentials."
-
-The CLI exits `2` for this, distinct from a failure. Escalating is a legitimate
-ending, not a crash — it is the path a human operator picks up. There is no
-`capability.json` because nothing was learned worth saving.
-
-### `discovery-2026-08-21T13-00-48-339Z` — outcome discovery
-
-`gemini-3-flash-preview`, completed in 12 turns. Kept because it shows a behaviour
-the shipped run does not: the model **deliberately searched a member number it knew
-was invalid**, saw the "No member found for" screen, and declared a business outcome:
+`gemini-3-flash-preview`, 12 turns. Kept because it shows behaviour the shipped
+run does not: the model **deliberately searched a member number it knew was
+invalid**, saw the result, and declared an outcome without being told to:
 
 ```
 {"kind":"OutcomeDeclared","tag":"MemberNotFound",
@@ -54,24 +42,68 @@ was invalid**, saw the "No member found for" screen, and declared a business out
  "whenText":"No member found for"}
 ```
 
-That is the distinction the whole result contract turns on — "no such member" is an
-answer the caller needs, not an error — and this model found it on its own because
-the prompt asks it to.
+That is the distinction the entire result contract turns on. Note also the
+`exploratory: true` steps in the trace — the probe is remembered as evidence but
+excluded from the compiled flow, so production never repeats it.
 
-**Caveat, stated plainly:** this run's `capability.json` was compiled by an earlier
-version of the compiler and contains a success condition of
-`textPresent: "$4,812.65"` — the balance it had just read. That check passes for
-member 12345 and fails for every other member, which is the worst kind of
-verification: it looks like a check and is really a recording of one answer. The
-compiler now rejects a success condition that echoes extracted data and falls back
-to a durable one; `run.json` was not being saved yet, so this artifact could not be
-re-compiled without spending another model run.
+*Caveat:* this run's `capability.json` predates several compiler fixes and its
+success condition is `textPresent "$4,812.65"` — the balance it had just read,
+which passes for one member and fails for every other. It is kept as a record of
+the run, not as a good artifact. `run.json` was not being saved yet, so it could
+not be recompiled.
+
+### 03 — discovery escalates to a human
+
+`gemini-3.5-flash-lite`. A weaker model could not get past sign-on, retried, and
+then called `escalate` rather than thrashing:
+
+> "Authentication failed with the provided operator credentials."
+
+The CLI exits `2` for this, distinct from failure. Escalating is a legitimate
+ending. There is no `capability.json` because nothing worth saving was learned.
+
+### 04 — replay succeeds
+
+The production path: no model, no API key. Seven steps, `$4,812.65` returned in
+about two seconds. Every step's intent is in the trace, along with the ranked
+strategy that resolved it.
+
+### 05 — replay reuses the capability for a different member
+
+The same artifact, `memberId=23456`, returns `$250.00`. Nothing was re-recorded
+and no model was consulted. This is the whole point of the system, and it only
+works because the recording refers to its inputs rather than containing them.
+
+### 06 — replay hits a member that does not exist
+
+`memberId=99999` → `TargetNotFound` at the extraction step.
+
+**Honest reading:** this *should* be a `MemberNotFound` business outcome, and it
+would be if this artifact declared one — run 02 shows a stronger model doing
+exactly that, and the replay test suite covers the outcome path end to end. The
+model that recorded the shipped artifact did not declare any outcomes, so replay
+correctly reports that it could not find what the step needed rather than
+inventing an answer. The failure is accurate; the artifact is incomplete.
+
+### 07 — replay rejects bad input
+
+`memberId=abc` → `InputValidationFailed`, against the `^\d+$` pattern the
+capability declares. No browser was opened and `stepsAttempted` is 0: a bad call
+costs nothing and changes nothing. The offending value is not quoted back, since
+an input can be regulated data.
+
+### 08 — replay hits an application error
+
+A 500 injected through `/__control/fault` → `ApplicationError` at step 4, with
+the HTTP status in the detail and a screenshot captured at the point of failure.
+Distinct from both a business outcome and a validation error, which is the split
+the result contract exists to make.
 
 ## A note on model choice
 
-The runs use different Gemini models because the free tier caps requests per model
-per day, and a discovery run costs roughly a dozen. Model id is config-driven
-(`GEMINI_MODEL`); it changes nothing about the system. The more capable models
-produced visibly better recordings — more checkpoints, and the outcome probing
-above — which is the expected shape of this trade-off: discovery runs once and its
+The runs use different Gemini models because the free tier caps requests per
+model per day and a discovery run costs about a dozen. Model id is config-driven
+(`GEMINI_MODEL`) and changes nothing structural. More capable models produced
+visibly better recordings — more checkpoints, and the outcome probing in 02 —
+which is the expected shape of the trade-off: discovery runs once, and its
 quality is baked into an artifact that then replays forever without a model.

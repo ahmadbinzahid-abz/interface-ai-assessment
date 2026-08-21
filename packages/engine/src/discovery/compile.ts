@@ -1,5 +1,6 @@
 import {
   CapabilityArtifact,
+  TargetDescriptor,
   DeclaredOutcome,
   Health,
   InputParam,
@@ -93,6 +94,63 @@ const parameterizeText = (
   return out
 }
 
+/**
+ * Parameterise the text a *descriptor* carries.
+ *
+ * A descriptor identifies a control by what is written near it, and in these
+ * applications what is written near it embeds the record you looked up — the
+ * savings row is found by anchoring on account number `S-0001-12345`. Left
+ * literal, the capability only ever finds member 12345's row.
+ *
+ * Note what this deliberately does *not* do: it does not remove parts of a
+ * descriptor. An earlier version dropped a `name` that matched an extracted
+ * value, on the reasoning that a balance is data rather than identity. That is
+ * true, but the recorder had already *verified* the descriptor resolved uniquely
+ * with that name present, and removing it left an anchor that matched two rows.
+ * The compiler cannot re-verify — it has no page in front of it — so it must not
+ * weaken a descriptor the recorder proved. Choosing a better anchor is the
+ * recorder's job, where the observation is available.
+ */
+const parameterizeDescriptor = (
+  descriptor: TargetDescriptor,
+  parameters: readonly DiscoveryParameter[]
+): TargetDescriptor =>
+  new TargetDescriptor({
+    ...descriptor,
+    name: descriptor.name
+      ? {
+          ...descriptor.name,
+          text: parameterizeText(descriptor.name.text, parameters),
+        }
+      : undefined,
+    anchors: descriptor.anchors.map((anchor) => ({
+      ...anchor,
+      match: {
+        ...anchor.match,
+        text: parameterizeText(anchor.match.text, parameters),
+      },
+    })),
+  })
+
+/** Apply the same treatment to whatever descriptor an action carries. */
+const parameterizeAction = (
+  action: DiscoveryRun["steps"][number]["action"],
+  parameters: readonly DiscoveryParameter[]
+): DiscoveryRun["steps"][number]["action"] => {
+  switch (action._tag) {
+    case "click":
+    case "type":
+    case "select":
+    case "extract":
+      return {
+        ...action,
+        target: parameterizeDescriptor(action.target, parameters),
+      }
+    default:
+      return action
+  }
+}
+
 /** Apply `parameterizeText` wherever a condition carries free text. */
 const parameterizeCondition = (
   condition: Condition,
@@ -145,16 +203,74 @@ const buildSuccessCondition = (
   if (!echoesExtractedData && proposed.trim().length > 0)
     return textPresent(proposed)
 
-  const lastCheckpoint = [...steps]
+  /**
+   * Falling back to the last extraction target.
+   *
+   * For a lookup capability this is the most honest statement of success there
+   * is: we are on a screen where the thing we were asked to read can be read.
+   * It is also parameterised for free, because the extract target is.
+   */
+  const lastExtract = [...steps]
     .reverse()
-    .find((step) => step.checkpoint)?.checkpoint
-  if (lastCheckpoint) return lastCheckpoint
+    .find((step) => step.action._tag === "extract")
+
+  if (lastExtract?.action._tag === "extract") {
+    return { _tag: "elementPresent", target: lastExtract.action.target }
+  }
+
+  /**
+   * Otherwise the last checkpoint that describes a *screen* rather than a
+   * moment. A `valueEquals` on a search box is true while the step runs and
+   * false three steps later, so reusing it as a success condition asserts
+   * something about a field the flow has already navigated away from.
+   */
+  const durable = [...steps]
+    .reverse()
+    .map((step) => step.checkpoint)
+    .find(
+      (checkpoint) =>
+        checkpoint?._tag === "textPresent" || checkpoint?._tag === "urlMatches"
+    )
+
+  if (durable) return durable
 
   // Nothing durable to assert on. Say so rather than inventing a check that
   // cannot fail — a reviewer needs to see this before approving the capability.
   return textPresent(
     "REVIEW REQUIRED: no durable success condition was recorded"
   )
+}
+
+/**
+ * Decide a step's checkpoint.
+ *
+ * For a `type` action the right check is knowable without asking anyone: the
+ * field should now hold what was typed. Models reliably get this wrong in a
+ * specific way — they name the screen the *flow* is heading for rather than the
+ * effect of this step, so a real run produced "you should see Member Search" on
+ * the step that types an operator id, which is false at that moment and fails
+ * every replay.
+ *
+ * For actions whose outcome genuinely varies — a click, a navigation — the
+ * model's own expectation is the useful one, because only it knows what the
+ * resulting screen should say. The recorder has already discarded any
+ * expectation it could see was untrue at the time.
+ */
+const checkpointFor = (
+  step: DiscoveryRun["steps"][number],
+  parameters: readonly DiscoveryParameter[]
+): Condition | undefined => {
+  if (step.action._tag === "type") {
+    return {
+      _tag: "valueEquals",
+      target: parameterizeDescriptor(step.action.target, parameters),
+      expected: step.action.value,
+    }
+  }
+
+  return step.checkpoint
+    ? parameterizeCondition(step.checkpoint, parameters)
+    : undefined
 }
 
 export const compileCapability = ({
@@ -240,11 +356,9 @@ export const compileCapability = ({
         new Step({
           id: step.id,
           intent: step.intent,
-          action: step.action,
+          action: parameterizeAction(step.action, parameters),
           riskClass: step.riskClass,
-          checkpoint: step.checkpoint
-            ? parameterizeCondition(step.checkpoint, parameters)
-            : undefined,
+          checkpoint: checkpointFor(step, parameters),
           timeoutMs: 10_000,
           observedMs: step.observedMs,
         })

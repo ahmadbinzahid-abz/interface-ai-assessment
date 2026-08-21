@@ -1,8 +1,8 @@
 {
-  "runId": "discovery-2026-08-21T13-12-46-024Z",
+  "runId": "discovery-2026-08-21T14-27-08-526Z",
   "result": {
     "_tag": "Completed",
-    "summary": "Successfully looked up member [redacted:declared] and retrieved their savings balance of $4,812.65.",
+    "summary": "Looked up member [redacted:declared] and extracted their savings balance.",
     "successText": "$4,812.65"
   },
   "steps": [
@@ -65,11 +65,7 @@
         "clearFirst": true
       },
       "riskClass": "safe",
-      "checkpoint": {
-        "_tag": "textPresent",
-        "text": "Member Search"
-      },
-      "observedMs": 40,
+      "observedMs": 201,
       "resolvedAtRank": 0,
       "exploratory": false
     },
@@ -117,15 +113,15 @@
       "riskClass": "safe",
       "checkpoint": {
         "_tag": "textPresent",
-        "text": "Member Search"
+        "text": "Sign On"
       },
-      "observedMs": 15,
+      "observedMs": 171,
       "resolvedAtRank": 0,
       "exploratory": false
     },
     {
       "id": "s4",
-      "intent": "Clicking the Sign On button to authenticate.",
+      "intent": "Clicking the Sign On button to access the main dashboard.",
       "action": {
         "_tag": "click",
         "target": {
@@ -159,7 +155,7 @@
         "_tag": "textPresent",
         "text": "Member Search"
       },
-      "observedMs": 56,
+      "observedMs": 249,
       "resolvedAtRank": 0,
       "exploratory": false
     },
@@ -209,15 +205,15 @@
       "riskClass": "safe",
       "checkpoint": {
         "_tag": "textPresent",
-        "text": "Member Details"
+        "text": "Member Number"
       },
-      "observedMs": 29,
+      "observedMs": 199,
       "resolvedAtRank": 0,
       "exploratory": false
     },
     {
       "id": "s6",
-      "intent": "Clicking the Search button to retrieve member information.",
+      "intent": "Clicking the Search button to retrieve the member's information.",
       "action": {
         "_tag": "click",
         "target": {
@@ -249,58 +245,36 @@
         }
       },
       "riskClass": "safe",
-      "checkpoint": {
-        "_tag": "textPresent",
-        "text": "Savings Balance"
-      },
-      "observedMs": 55,
+      "observedMs": 385,
       "resolvedAtRank": 0,
       "exploratory": false
     },
     {
       "id": "s7",
-      "intent": "The search button didn't seem to navigate to the member details page, so I'm trying to navigate directly to the member's page.",
-      "action": {
-        "_tag": "navigate",
-        "url": {
-          "_tag": "template",
-          "text": "http://localhost:4100/firstcity/desk/member/{{memberId}}"
-        }
-      },
-      "riskClass": "safe",
-      "checkpoint": {
-        "_tag": "urlMatches",
-        "pattern": "http://localhost:4100/firstcity/desk/member/[redacted:declared]"
-      },
-      "observedMs": 0
-    },
-    {
-      "id": "s8",
-      "intent": "Extracting the savings balance as requested.",
+      "intent": "Extracting the savings balance for the member.",
       "action": {
         "_tag": "extract",
         "target": {
-          "description": "cell \"$4,812.65\"",
-          "frame": [],
+          "description": "cell holding savingsBalance",
+          "frame": [
+            "contentFrame"
+          ],
           "role": "cell",
-          "name": {
-            "text": "$4,812.65",
-            "exact": true
-          },
           "anchors": [
             {
               "relation": "rightOf",
               "role": "cell",
               "match": {
-                "text": "2019-03-11",
+                "text": "S-0001-[redacted:declared]",
                 "exact": true
               }
             }
           ],
+          "nth": 1,
           "fallbacks": [
             {
               "_tag": "point",
-              "x": 353,
+              "x": 524,
               "y": 144,
               "viewport": {
                 "width": 1280,
@@ -313,7 +287,7 @@
         "as": "currency-usd"
       },
       "riskClass": "safe",
-      "observedMs": 38,
+      "observedMs": 39,
       "resolvedAtRank": 0
     }
   ],
@@ -327,6 +301,6 @@
   ],
   "outcomes": [],
   "modelId": "gemini-3.1-flash-lite",
-  "turns": 9,
-  "durationMs": 15796
+  "turns": 8,
+  "durationMs": 35537
 }

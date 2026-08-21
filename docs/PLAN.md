@@ -224,7 +224,7 @@ adding an outcome to a capability breaks the build until the UI handles it.
 | 1 ✅ | `apps/target-corebank`: search → detail → sub-account form → confirmation; framesets, tables, no test IDs; session cookie; 2 tenant variants; `?fault=` injection | Every fault path walkable by hand |
 | 2 ✅ | `packages/contracts` (schema + unions) and `packages/surface` (AX observation, ranked resolver, screencast) | Resolver unit tests pass on hostile markup; `Surface` signature has zero Playwright types |
 | 3 ✅ | Discovery loop (Gemini tool use), policy chokepoint, evidence writer, artifact compiler (parameterization + checkpoint inference) | **One real LLM run** completes the goal and emits an artifact into `/evidence/` |
-| 4 | Replay engine: executor, detection ordering, recovery layer, result contract, output extraction | Happy path + all seven fault paths hit the correct branch of the result union |
+| 4 ✅ | Replay engine: executor, detection ordering, recovery layer, result contract, output extraction | Happy path + all seven fault paths hit the correct branch of the result union |
 | 5 | Session manager, control lease, intervention API, WS screencast + input forwarding, operator capture, handback | Live run pauses → human drives → hands back → run completes |
 | 6 | Operator console: catalog, run/evidence viewer, intervention inbox, take-control, playground | — |
 | 7 | Tenant overlay merge, drift telemetry, capability catalog as Gemini function declarations + demo invocation | One artifact replays on both tenant variants |
@@ -344,7 +344,59 @@ pnpm --filter orchestrator run cua discover \
   --param memberId=12345
 ```
 
-## 10c. Carry-over into Phase 4
+## 10d. Phase 4 status
+
+**Phase 4 — complete.** 108 tests. The full thread runs end to end: a real
+Gemini discovery run, a compiled capability, and deterministic replay with no
+model — including replay of the *same* artifact for a member it was never
+recorded against.
+
+The executor's shape is the deliverable. After every step it evaluates, in this
+order: declared business outcome → declared recovery → built-in surface signal →
+the step's own checkpoint. Checking the checkpoint first would report "expected
+the member page, saw something else" for a not-found result, which is true and
+useless.
+
+Six defects found by running it, each fixed where it belonged:
+
+1. **`read` used `innerText`**, which is empty for an `<input>`. Every "did the
+   field take what we typed?" checkpoint failed. The checkpoint designed to catch
+   silently-rejected input caught a bug in the reader instead.
+2. **Nothing waited.** A checkpoint was evaluated before the navigation it was
+   waiting for had landed. The checkpoint *is* the wait now — polled until it
+   holds or the step times out, so an artifact never carries a sleep.
+3. **Placeholders were not substituted in descriptors**, only in conditions. An
+   anchor on `S-0001-{{memberId}}` matched nothing.
+4. **Recovery has two kinds.** Dismissing an interstitial clears an obstruction —
+   the action already happened and re-running it is wrong. Re-authenticating
+   restores lost context — the action must be redone. `Recovery.retriesStep`
+   makes the distinction explicit, defaulting to the safer of the two.
+5. **Even a context-restoring recovery must re-check before re-acting**, because
+   re-authentication replays the sign-on prelude and may already have completed
+   the interrupted step.
+6. **Discovery had the same missing-wait bug**, which made its tests flaky. It now
+   reads until two consecutive observations agree.
+
+### Recording quality, and where it is enforced
+
+Three fixes moved recording from "works for the record it was recorded against"
+to genuinely reusable. All three belong in the *recorder*, where the page is
+available and a choice can be verified:
+
+- A `type` step's checkpoint is decided by the compiler, not the model. Models
+  reliably name the screen the flow is heading for rather than this step's effect.
+- An expectation the recorder can see is false is **not recorded**, and the model
+  is told so it can supply a real one.
+- An extraction target is never identified by the value it is about to extract,
+  and anchors prefer text that is *unique on the page* — the account number, not
+  the opening date that every account opened that day shares.
+
+One correction worth keeping: an earlier attempt made the last fix in the
+*compiler*, which weakened a descriptor the recorder had already verified as
+unique and produced an ambiguous target. The compiler has no page in front of it
+and must not second-guess a verified recording.
+
+## 10c. Carry-over into Phase 4 (now delivered)
 
 Concrete obligations the replay engine inherits. These are not ideas — each one
 already exists in a committed artifact and will fail without the matching support:

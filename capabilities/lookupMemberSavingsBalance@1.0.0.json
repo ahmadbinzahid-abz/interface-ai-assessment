@@ -4,7 +4,7 @@
   "name": "lookupMemberSavingsBalance",
   "version": "1.0.0",
   "status": "draft",
-  "description": "Successfully looked up member 12345 and retrieved their savings balance of $4,812.65.",
+  "description": "Looked up member 12345 and extracted their savings balance.",
   "target": {
     "surfaceKind": "legacy-web",
     "vendorProduct": "corebank",
@@ -93,11 +93,44 @@
       },
       "riskClass": "safe",
       "checkpoint": {
-        "_tag": "textPresent",
-        "text": "Member Search"
+        "_tag": "valueEquals",
+        "target": {
+          "description": "textbox labelled \"Operator ID\"",
+          "frame": [],
+          "role": "textbox",
+          "anchors": [
+            {
+              "relation": "rightOf",
+              "role": "cell",
+              "match": {
+                "text": "Operator ID",
+                "exact": true
+              }
+            }
+          ],
+          "fallbacks": [
+            {
+              "_tag": "controlName",
+              "name": "f1_ctl01"
+            },
+            {
+              "_tag": "point",
+              "x": 249,
+              "y": 63,
+              "viewport": {
+                "width": 1280,
+                "height": 900
+              }
+            }
+          ]
+        },
+        "expected": {
+          "_tag": "secret",
+          "ref": "operatorId"
+        }
       },
       "timeoutMs": 10000,
-      "observedMs": 40
+      "observedMs": 201
     },
     {
       "id": "s3",
@@ -142,15 +175,48 @@
       },
       "riskClass": "safe",
       "checkpoint": {
-        "_tag": "textPresent",
-        "text": "Member Search"
+        "_tag": "valueEquals",
+        "target": {
+          "description": "textbox labelled \"Password\"",
+          "frame": [],
+          "role": "textbox",
+          "anchors": [
+            {
+              "relation": "rightOf",
+              "role": "cell",
+              "match": {
+                "text": "Password",
+                "exact": true
+              }
+            }
+          ],
+          "fallbacks": [
+            {
+              "_tag": "controlName",
+              "name": "f1_ctl02"
+            },
+            {
+              "_tag": "point",
+              "x": 249,
+              "y": 90,
+              "viewport": {
+                "width": 1280,
+                "height": 900
+              }
+            }
+          ]
+        },
+        "expected": {
+          "_tag": "secret",
+          "ref": "operatorPassword"
+        }
       },
       "timeoutMs": 10000,
-      "observedMs": 15
+      "observedMs": 171
     },
     {
       "id": "s4",
-      "intent": "Clicking the Sign On button to authenticate.",
+      "intent": "Clicking the Sign On button to access the main dashboard.",
       "action": {
         "_tag": "click",
         "target": {
@@ -185,7 +251,7 @@
         "text": "Member Search"
       },
       "timeoutMs": 10000,
-      "observedMs": 56
+      "observedMs": 249
     },
     {
       "id": "s5",
@@ -232,15 +298,50 @@
       },
       "riskClass": "safe",
       "checkpoint": {
-        "_tag": "textPresent",
-        "text": "Member Details"
+        "_tag": "valueEquals",
+        "target": {
+          "description": "textbox labelled \"Member Number\"",
+          "frame": [
+            "contentFrame"
+          ],
+          "role": "textbox",
+          "anchors": [
+            {
+              "relation": "rightOf",
+              "role": "cell",
+              "match": {
+                "text": "Member Number",
+                "exact": true
+              }
+            }
+          ],
+          "fallbacks": [
+            {
+              "_tag": "controlName",
+              "name": "f1_ctl03"
+            },
+            {
+              "_tag": "point",
+              "x": 399,
+              "y": 63,
+              "viewport": {
+                "width": 1280,
+                "height": 900
+              }
+            }
+          ]
+        },
+        "expected": {
+          "_tag": "param",
+          "name": "memberId"
+        }
       },
       "timeoutMs": 10000,
-      "observedMs": 29
+      "observedMs": 199
     },
     {
       "id": "s6",
-      "intent": "Clicking the Search button to retrieve member information.",
+      "intent": "Clicking the Search button to retrieve the member's information.",
       "action": {
         "_tag": "click",
         "target": {
@@ -272,58 +373,35 @@
         }
       },
       "riskClass": "safe",
-      "checkpoint": {
-        "_tag": "textPresent",
-        "text": "Savings Balance"
-      },
       "timeoutMs": 10000,
-      "observedMs": 55
+      "observedMs": 385
     },
     {
       "id": "s7",
-      "intent": "The search button didn't seem to navigate to the member details page, so I'm trying to navigate directly to the member's page.",
-      "action": {
-        "_tag": "navigate",
-        "url": {
-          "_tag": "template",
-          "text": "http://localhost:4100/firstcity/desk/member/{{memberId}}"
-        }
-      },
-      "riskClass": "safe",
-      "checkpoint": {
-        "_tag": "urlMatches",
-        "pattern": "http://localhost:4100/firstcity/desk/member/{{memberId}}"
-      },
-      "timeoutMs": 10000,
-      "observedMs": 0
-    },
-    {
-      "id": "s8",
-      "intent": "Extracting the savings balance as requested.",
+      "intent": "Extracting the savings balance for the member.",
       "action": {
         "_tag": "extract",
         "target": {
-          "description": "cell \"$4,812.65\"",
-          "frame": [],
+          "description": "cell holding savingsBalance",
+          "frame": [
+            "contentFrame"
+          ],
           "role": "cell",
-          "name": {
-            "text": "$4,812.65",
-            "exact": true
-          },
           "anchors": [
             {
               "relation": "rightOf",
               "role": "cell",
               "match": {
-                "text": "2019-03-11",
+                "text": "S-0001-{{memberId}}",
                 "exact": true
               }
             }
           ],
+          "nth": 1,
           "fallbacks": [
             {
               "_tag": "point",
-              "x": 353,
+              "x": 524,
               "y": 144,
               "viewport": {
                 "width": 1280,
@@ -337,13 +415,41 @@
       },
       "riskClass": "safe",
       "timeoutMs": 10000,
-      "observedMs": 38
+      "observedMs": 39
     }
   ],
   "recoveries": [],
   "successCondition": {
-    "_tag": "urlMatches",
-    "pattern": "http://localhost:4100/firstcity/desk/member/{{memberId}}"
+    "_tag": "elementPresent",
+    "target": {
+      "description": "cell holding savingsBalance",
+      "frame": [
+        "contentFrame"
+      ],
+      "role": "cell",
+      "anchors": [
+        {
+          "relation": "rightOf",
+          "role": "cell",
+          "match": {
+            "text": "S-0001-{{memberId}}",
+            "exact": true
+          }
+        }
+      ],
+      "nth": 1,
+      "fallbacks": [
+        {
+          "_tag": "point",
+          "x": 524,
+          "y": 144,
+          "viewport": {
+            "width": 1280,
+            "height": 900
+          }
+        }
+      ]
+    }
   },
   "policy": {
     "allowlistRef": "corebank-readonly",
@@ -352,9 +458,9 @@
   },
   "provenance": {
     "discoveredBy": "gemini-3.1-flash-lite",
-    "discoveredAt": "2026-08-21T13:13:01.836Z",
-    "runId": "discovery-2026-08-21T13-12-46-024Z",
-    "transcriptDigest": "sha256:c739ec19d204fcf45267dbc94395c7cf14158fa133ce0d3617907ec44d35f518"
+    "discoveredAt": "2026-08-21T14:27:44.083Z",
+    "runId": "discovery-2026-08-21T14-27-08-526Z",
+    "transcriptDigest": "sha256:77d9014ce0aae886a0cfce6509db1e65d9380d338d9b1281ab4267fc587105a6"
   },
   "health": {
     "replays": 0,

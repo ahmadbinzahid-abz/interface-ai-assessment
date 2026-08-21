@@ -80,7 +80,8 @@ const boolProperty = (
  */
 export const readObservation = async (
   page: Page,
-  cdp: CDPSession
+  cdp: CDPSession,
+  httpStatus?: number
 ): Promise<Observation> => {
   const { frameTree } = await cdp.send("Page.getFrameTree")
   const frames = flattenFrameTree(frameTree, [], true)
@@ -126,6 +127,7 @@ export const readObservation = async (
     title: await page.title().catch(() => ""),
     capturedAt: new Date().toISOString(),
     frames: observed,
+    httpStatus,
   })
 }
 

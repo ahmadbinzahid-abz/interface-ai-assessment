@@ -73,6 +73,25 @@ export const makeWebSurface = ({
         }),
     })
 
+    /**
+     * The status of the most recent document response.
+     *
+     * These applications carry meaning in the status line that is invisible in
+     * the page text — the stand-in returns 404 for "no such member", 403 for a
+     * permission denial and 422 for a rejected form — so an artifact can detect
+     * an outcome by status instead of by matching a message that a tenant may
+     * have reworded. Document responses only: an image 404 is not the page.
+     *
+     * The last one wins, which for a frameset is the frame that actually
+     * navigated, and that is the one carrying the answer.
+     */
+    let lastDocumentStatus: number | undefined
+    page.on("response", (response) => {
+      if (response.request().resourceType() === "document") {
+        lastDocumentStatus = response.status()
+      }
+    })
+
     // ── Frames ───────────────────────────────────────────────────────────
 
     const findFrame = (path: readonly string[]): Frame | undefined => {
@@ -174,7 +193,7 @@ export const makeWebSurface = ({
 
     const observe = (): Effect.Effect<Observation, SurfaceError> =>
       Effect.tryPromise({
-        try: () => readObservation(page, cdp),
+        try: () => readObservation(page, cdp, lastDocumentStatus),
         catch: (cause) => new SurfaceUnavailable({ detail: String(cause) }),
       })
 
@@ -394,6 +413,14 @@ export const makeWebSurface = ({
         })
       })
 
+    /**
+     * Read what a control currently holds.
+     *
+     * Form controls carry their content in the `value` *property*, not in text
+     * content — `innerText` on an `<input>` is always empty. Getting this wrong
+     * makes every "did the field actually take what we typed?" checkpoint fail,
+     * which is how this was found.
+     */
     const read = (handle: TargetHandle): Effect.Effect<string, SurfaceError> =>
       Effect.tryPromise({
         try: () =>
@@ -402,7 +429,15 @@ export const makeWebSurface = ({
                 new Error("cannot read text from a coordinate handle")
               )
             : withElement(handle, (locator) =>
-                locator.innerText({ timeout: defaultTimeoutMs })
+                locator.evaluate((element) =>
+                  element instanceof HTMLInputElement ||
+                  element instanceof HTMLTextAreaElement ||
+                  element instanceof HTMLSelectElement
+                    ? element.value
+                    : ((element as HTMLElement).innerText ??
+                      element.textContent ??
+                      "")
+                )
               ),
         catch: (cause) =>
           new InteractionFailed({ command: "read", detail: String(cause) }),

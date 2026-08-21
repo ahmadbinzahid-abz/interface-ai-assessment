@@ -1,0 +1,20 @@
+{
+  "_tag": "Failed",
+  "summary": {
+    "runId": "replay-2026-08-21T14-31-31-933Z",
+    "capabilityId": "cap_lookupmembersavingsbalance",
+    "capabilityVersion": "1.0.0",
+    "tenant": null,
+    "startedAt": "2026-08-21T14:31:31.933Z",
+    "durationMs": 3,
+    "stepsAttempted": 0,
+    "evidenceRef": "C:\\Users\\Ahmad\\Desktop\\interface-ai-assessment\\evidence\\replay-2026-08-21T14-31-31-930Z"
+  },
+  "error": {
+    "_tag": "InputValidationFailed",
+    "issues": [
+      "Input \"memberId\" does not match ^\\d+$."
+    ]
+  },
+  "trace": []
+}

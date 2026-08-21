@@ -125,6 +125,20 @@ export class Recovery extends Schema.Class<Recovery>("Recovery")({
   name: Schema.String,
   when: Condition,
   do: Schema.Array(Action),
+  /**
+   * Whether the interrupted step must be performed again afterwards.
+   *
+   * The two kinds of recovery are genuinely different. Dismissing an
+   * interstitial *clears an obstruction*: the step's action already happened and
+   * re-running it would be wrong — a "Sign On" click that succeeded before the
+   * notice appeared cannot be repeated, because there is no sign-on screen any
+   * more. Re-authenticating *restores lost context*: whatever the step did was
+   * thrown away with the session, so it has to be redone.
+   *
+   * Defaulting to false keeps the safer of the two: re-running an action that
+   * already took effect is how a replay submits a form twice.
+   */
+  retriesStep: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   /** Bounded, so a recovery loop cannot become an infinite one. */
   maxPerRun: Schema.optionalWith(Schema.Number, { default: () => 2 }),
 }) {}
