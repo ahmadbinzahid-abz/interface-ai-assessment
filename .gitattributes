@@ -1,0 +1,6 @@
+# Normalise to LF in the repository and on checkout, matching .prettierrc
+# (endOfLine: "lf"). Without this, Windows checkouts fight the formatter.
+* text=auto eol=lf
+
+# Generated; keep out of diffs and language stats.
+pnpm-lock.yaml linguist-generated=true -diff

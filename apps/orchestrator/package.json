@@ -1,0 +1,34 @@
+{
+  "name": "orchestrator",
+  "version": "0.0.1",
+  "description": "HTTP API, `cua` CLI, and live-takeover gateway for the computer-use automation system.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server/main.ts",
+    "start": "tsx src/server/main.ts",
+    "cua": "tsx src/cli/main.ts",
+    "lint": "eslint",
+    "format": "prettier --write \"**/*.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/ws": "^8.18.1",
+    "@workspace/eslint-config": "workspace:*",
+    "@workspace/typescript-config": "workspace:*",
+    "eslint": "^9",
+    "tsx": "^4.23.0",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@effect/platform": "^0.97.1",
+    "@effect/platform-node": "^0.108.1",
+    "@workspace/contracts": "workspace:*",
+    "@workspace/engine": "workspace:*",
+    "@workspace/policy": "workspace:*",
+    "@workspace/surface": "workspace:*",
+    "effect": "^3.22.1",
+    "ws": "^8.21.3"
+  }
+}

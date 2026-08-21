@@ -4,4 +4,7 @@ node_modules/
 .turbo/
 coverage/
 pnpm-lock.yaml
-.pnpm-store/
+.pnpm-store/.agents/
+.claude/
+packages/store/src/generated/
+evidence/

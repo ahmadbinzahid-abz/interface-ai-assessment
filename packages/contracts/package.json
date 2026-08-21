@@ -1,0 +1,26 @@
+{
+  "name": "@workspace/contracts",
+  "version": "0.0.0",
+  "description": "Capability artifact schema, action/observation model, and the HTTP API contract.",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "lint": "eslint",
+    "format": "prettier --write \"**/*.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@workspace/eslint-config": "workspace:*",
+    "@workspace/typescript-config": "workspace:*",
+    "eslint": "^9",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@effect/platform": "^0.97.1",
+    "effect": "^3.22.1"
+  }
+}

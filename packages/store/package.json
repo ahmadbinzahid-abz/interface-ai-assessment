@@ -1,0 +1,29 @@
+{
+  "name": "@workspace/store",
+  "version": "0.0.0",
+  "description": "Prisma schema, client, and repositories for runs, interventions, sessions, and the evidence index.",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "lint": "eslint",
+    "format": "prettier --write \"**/*.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.41",
+    "@workspace/eslint-config": "workspace:*",
+    "@workspace/typescript-config": "workspace:*",
+    "dotenv": "^17.4.2",
+    "eslint": "^9",
+    "prisma": "^7.9.1",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@prisma/client": "^7.9.1",
+    "effect": "^3.22.1"
+  }
+}

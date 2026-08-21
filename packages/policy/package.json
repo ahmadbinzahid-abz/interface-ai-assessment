@@ -1,0 +1,26 @@
+{
+  "name": "@workspace/policy",
+  "version": "0.0.0",
+  "description": "Allowlist enforcement, risk classification, and redaction.",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "lint": "eslint",
+    "format": "prettier --write \"**/*.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@workspace/eslint-config": "workspace:*",
+    "@workspace/typescript-config": "workspace:*",
+    "eslint": "^9",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@workspace/contracts": "workspace:*",
+    "effect": "^3.22.1"
+  }
+}
