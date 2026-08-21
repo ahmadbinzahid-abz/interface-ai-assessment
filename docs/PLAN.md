@@ -20,12 +20,36 @@ customer-facing agent invokes by name with typed args.
 | Target app | Build `apps/target-corebank` — hostile legacy surface | Lets us inject the runtime faults that §3.3 is graded on, and fake two tenants for §3.7 |
 | Perception | Accessibility tree first, screenshot fallback | Only representation that exists on web, legacy web, and desktop (UIA / AX / AT-SPI) |
 | Browser control | Playwright + Chromium (CDP access) | AX tree, frames, screencast, tracing in one tool |
-| LLM | **Gemini** via `@google/genai` | User directive. `gemini-3.1-pro-preview` default, `gemini-3.7-flash` cheap/stable alternative; model ID is config-driven |
+| LLM | **Gemini** via `@google/genai` | User directive. Model id is config-driven via `GEMINI_MODEL` — see the availability note below before picking one |
 | Backend | Node 24 + Effect + `@effect/platform` HttpApi | Typed error channel maps 1:1 onto the required business-outcome / failure split |
 | Persistence | Postgres + Prisma (Docker) for operational data; artifacts as git-committed JSON | Artifacts are code-like assets reviewed in a PR; runs are operational data |
 | Takeover | CDP `Page.startScreencast` + `Input.dispatch*` forwarding | Human drives the same live page — makes §3.6 unambiguously real |
 | Frontend | Next.js 16 + React 19 + shadcn (`apps/web`) | Already scaffolded |
 | Stretch goals | Agent-facing capability catalog; cross-tenant overlay reuse | Both near-free given the above |
+
+### Model availability and quota — read before spending a run
+
+Established empirically on 2026-08-21 against this project's key. Free tier, and the
+numbers are per *model*, not per project:
+
+- **Roughly 20 requests per day, per model.** One discovery run costs ~12. There is
+  very little headroom, so do not spend a run casually.
+- **5 requests per minute, per model.** Handled by backoff; it makes a run take a
+  couple of minutes.
+- **`gemini-3.1-pro-preview` is `limit: 0`** — the Pro tier is not on the free tier at
+  all, so `DEFAULT_GEMINI_MODEL` in `packages/engine/src/gemini.ts` is currently
+  pointing at something this key cannot call. Change it or always pass `GEMINI_MODEL`.
+- **`gemini-flash-latest` is an alias for `gemini-3.7-flash`** and shares its bucket.
+- `gemini-2.5-pro` and `gemini-2.5-flash-lite` return 404: retired for new users.
+- Known good, each with its own daily bucket: `gemini-3-flash-preview` (produced the
+  best recording — probed for the not-found screen unprompted), `gemini-3.7-flash`,
+  `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.1-flash-lite`.
+
+`ai.models.list()` filtered on `supportedActions.includes("generateContent")` is the
+cheap way to see what a key can reach; it does not consume generation quota.
+
+**Never delete `evidence/` or `capabilities/` before a replacement run has succeeded.**
+Recovering a lost run costs quota that may not exist that day.
 
 ### Why not Gemini's computer-use model
 
