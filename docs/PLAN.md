@@ -344,6 +344,30 @@ pnpm --filter orchestrator run cua discover \
   --param memberId=12345
 ```
 
+## 10c. Carry-over into Phase 4
+
+Concrete obligations the replay engine inherits. These are not ideas — each one
+already exists in a committed artifact and will fail without the matching support:
+
+1. **`{{placeholder}}` substitution.** Checkpoints, success conditions and outcome
+   detectors carry `{{memberId}}`-style placeholders, and `ValueRef` has a `template`
+   variant carrying them inside URLs. The replay evaluator must resolve them from the
+   supplied inputs, earlier outputs, and the vault before matching or acting. The
+   shipped capability will not replay correctly until this exists.
+2. **`{$secret}` resolution needs a vault.** There is no vault yet — discovery took
+   credentials from `--secret`. Replay needs somewhere to resolve `operatorId` and
+   `operatorPassword` from, even if the first version is an env-backed stub behind a
+   clean interface.
+3. **`valueEquals` must be implemented.** Typed steps now get an automatic checkpoint
+   asserting the field holds what was typed; it is the cheapest instance of "never
+   assume the action worked".
+4. **Richer signal on failure (§3.5).** `Surface.screenshot` exists and the evidence
+   writer takes images, but nothing captures one yet. Replay failures and escalations
+   are where it belongs.
+5. **Health write-back.** `health.fallbackHitRate` is the drift alarm described in §3,
+   and replay is the only thing that can populate it — the resolution rank is already
+   returned on every resolve.
+
 ## 10. Status log
 
 **Phase 0 — complete.** Workspace wired: `contracts`, `surface`, `policy`, `engine`,
