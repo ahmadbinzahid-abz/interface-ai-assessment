@@ -33,8 +33,10 @@ export default defineConfig({
           include: ["packages/*/test/**/*.test.ts", "apps/*/test/**/*.test.ts"],
           setupFiles: ["./packages/store/src/testing/setup.ts"],
           pool: "forks",
-          poolOptions: { forks: { singleFork: true } },
+          // Vitest 4 removed poolOptions; fileParallelism:false already pins
+          // maxWorkers to 1, which is what a shared database needs.
           fileParallelism: false,
+          maxWorkers: 1,
           // Browser-driven replay tests are slower than a typical unit test.
           testTimeout: 30_000,
           hookTimeout: 30_000,

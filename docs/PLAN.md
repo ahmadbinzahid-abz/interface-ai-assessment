@@ -197,7 +197,7 @@ adding an outcome to a capability breaks the build until the UI handles it.
 | Phase | Scope | Gate |
 |---|---|---|
 | 0 ✅ | Deps via official CLIs; `apps/web` → `src/features/…`; Vitest; docker-compose Postgres | `pnpm typecheck` + `pnpm lint` clean |
-| 1 | `apps/target-corebank`: search → detail → sub-account form → confirmation; framesets, tables, no test IDs; session cookie; 2 tenant variants; `?fault=` injection | Every fault path walkable by hand |
+| 1 ✅ | `apps/target-corebank`: search → detail → sub-account form → confirmation; framesets, tables, no test IDs; session cookie; 2 tenant variants; `?fault=` injection | Every fault path walkable by hand |
 | 2 | `packages/contracts` (schema + unions) and `packages/surface` (AX observation, ranked resolver, screencast) | Resolver unit tests pass on hostile markup; `Surface` signature has zero Playwright types |
 | 3 | Discovery loop (Gemini tool use), policy chokepoint, evidence writer, artifact compiler (parameterization + checkpoint inference) | **One real LLM run** completes the goal and emits an artifact into `/evidence/` |
 | 4 | Replay engine: executor, detection ordering, recovery layer, result contract, output extraction | Happy path + all seven fault paths hit the correct branch of the result union |
@@ -232,8 +232,33 @@ Verified explicitly rather than assumed: NodeNext requires `.js` extensions on r
 imports, and cross-package imports resolve from TypeScript source at both compile time
 and runtime with no build step (`orchestrator → policy → contracts`).
 
-*Open:* Docker Desktop was not running, so `pnpm db:up` has not been exercised. Nothing
-depends on it until the Prisma schema lands in Phase 2.
+Postgres verified: `pnpm db:up` brings the container up healthy with both `cua` and
+`cua_test` created by the init script.
+
+**Phase 1 — complete.** `apps/target-corebank` serves a period-accurate legacy servicing
+app: HTML 4.01, a real `<frameset>`, table layouts, `f1_ctl03`-style control names, no
+test IDs, and no accessible names on inputs. Sign-on → member search → member detail →
+sub-account form → confirmation, plus an irreversible "Close Account" control for the
+policy engine to refuse. Two tenants (`firstcity`, `riverbend`) run the same vendor
+product with different labels, button captions, and table nesting. Faults are armed out
+of band via `/__control/fault`, so a fault replay drives exactly the same URLs as a happy
+one. 20 tests through the real Hono app; all eight rows of the §9 fault matrix reachable.
+
+### Phase 1 probe findings (these change Phase 2)
+
+Verified against a real browser rather than assumed:
+
+1. **`newCDPSession(frame)` does not work for same-origin frames** — Playwright throws
+   *"This frame does not have a separate CDP session"*. The Surface adapter must instead
+   walk `Page.getFrameTree` and call `Accessibility.getFullAXTree({ frameId })` per frame.
+   The page-level session alone returns **zero** controls for a frameset.
+2. **The member-id input has no accessible name at all** (`role=textbox name=""`), while
+   submit buttons do get one from `value` (`role=button name="Search"`). This is the mix
+   the ranked resolver has to handle: role+name for buttons, relational anchors for fields.
+3. **Extraction targets are ambiguous and state-dependent.** After a sub-account is
+   opened there are *two* rows whose first cell reads "Savings". The unique-match rule is
+   load-bearing, and the artifact's extract step must disambiguate — anchor on the account
+   number pattern rather than the product label alone.
 
 ## 11. Prerequisites
 
