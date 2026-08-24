@@ -16,12 +16,20 @@ judgement leak into replay.
 
 ```
 apps/target-corebank    the legacy application being automated (built, not borrowed)
-apps/orchestrator       the `cua` CLI
-packages/contracts      artifact schema, action model, result contract  ← the spine
+apps/orchestrator       the `cua` CLI, the typed HTTP API, the takeover gateway
+apps/web                the operator console
+packages/contracts      artifact schema, action model, result contract, the API  ← the spine
 packages/surface        the Surface abstraction + the Playwright/CDP adapter
 packages/policy         allowlist, risk classification, redaction
-packages/engine         discovery loop, replay executor, evidence
+packages/engine         discovery loop, replay executor, sessions, evidence, catalog
 ```
+
+**The API is a value, not a set of routes.** `packages/contracts/src/api.ts` is
+one declaration that the orchestrator implements and the console consumes through
+a *derived* client. There is no SDK to regenerate and nothing to keep in sync: add
+a declared error to an endpoint and every screen that consumes it stops compiling
+until somebody decides what it should look like. The same property that makes the
+artifact schema the spine of the engine makes this the spine of the interface.
 
 **Perception is the accessibility tree, not the DOM.** The load-bearing choice. It
 is the one representation that exists everywhere this system needs to go — Chromium
@@ -133,10 +141,15 @@ The result union is `Succeeded | BusinessOutcome | Escalated | Failed`, with
 observed. Inputs are validated against the declared contract *before* a browser
 opens, so a bad call costs nothing and changes nothing.
 
-**On drift.** Not the interesting failure here, but cheap to observe: replay records
-which rank resolved each step, so one that used to resolve by role and now resolves
-by its markup fallback still passes while telling you this install has moved. That
-is `fallbackHitRate`, and it is the signal that a tenant needs an overlay.
+**On drift.** Replay records which rank resolved each step, so one that used to
+resolve by role and now resolves by its markup fallback still passes while telling
+you this install has moved. That is `fallbackHitRate`, and it is kept **per
+institution** — the aggregate stops being actionable the moment one capability
+serves many installs, because three percent across forty tenants is either forty
+slightly degraded or one that has moved, and only the second is something a person
+can do anything about. `driftingSteps` turns the split into a concrete proposal:
+*these steps need an entry in this tenant's overlay*, which is a reviewable pull
+request rather than an alert nobody knows what to do with.
 
 ---
 
@@ -166,11 +179,32 @@ distinction honest. Drift is detected by the rank telemetry above, which also te
 you *which step* needs the override.
 
 The stand-in serves two tenants (`firstcity`, `riverbend`) with different field
-labels, button captions, and table nesting, so the mechanism has something real to
-work against. **The merge is implemented and unit-tested** — including that it
-leaves the base artifact untouched, appends rather than replaces recoveries, and
-ignores a stale override rather than failing a tenant's whole replay. **Replaying
-an artifact end-to-end against the second tenant is not yet demonstrated.**
+labels, button captions, table nesting, product versions, and entry points.
+**The shipped capability replays against both.** Evidence runs 09 and 10 are real
+CLI runs of the same committed artifact against the two installs; both return
+`$4,812.65`, and the Riverbend run records `summary.tenant: "riverbend"`. The
+overlay is nine lines — two controls and an entry point — and every step still
+resolved at rank 0 on both, meaning the relational anchors survived the extra table
+nesting without falling back to markup. The resolver did the work the overlay did
+not have to.
+
+**Getting there found the defect that made the whole idea not work.** The recording
+wrote its opening step as a *literal* URL, so an overlay setting `entryPoint`
+changed a field nothing read: the run signed into First City and then failed on a
+Riverbend label. It failed for a plausible-looking wrong reason, which is exactly
+how a bug like that survives review. The fix belongs in the compiler, not the
+overlay — a navigate URL that *is* the declared entry point is emitted as
+`{{entryPoint}}` and the install's origin as `{{baseUrl}}`, so `target.entryPoint`
+is load-bearing rather than decorative. A test asserts the run ends on
+`/riverbend/` and never touches `/firstcity/`.
+
+A quieter sibling: the compiler gives every `type` step a `valueEquals` checkpoint
+carrying its **own copy** of the descriptor. An overlay that retargeted the action
+alone would fill the field correctly and then fail to confirm it — a failure that
+reads as a broken tenant rather than a half-applied overlay. A checkpoint asserting
+the control the overlay just moved now moves with it, and explicit `checkpoints`
+and `successCondition` overrides exist for assertions about *words on a screen*
+rather than about controls.
 
 ---
 
@@ -178,10 +212,15 @@ an artifact end-to-end against the second tenant is not yet demonstrated.**
 
 **Detecting stuck.** Discovery counts identical actions and stops when one repeats —
 a model that cannot make progress does not stop, it tries again, which is expensive
-as well as useless. Replay escalates when policy returns `RequireApproval`, and
-surfaces `TargetNotFound` after every ranked strategy has been tried. Both are real
-and exercised: evidence run 03 is a genuine run where a weaker model could not
-authenticate and called `escalate` rather than thrashing.
+as well as useless. Replay escalates on two triggers: policy returning
+`RequireApproval`, which is the designed path, and `TargetNotFound` after every
+ranked strategy has been tried, which means the UI has moved. The second is where a
+person is genuinely better than a retry — the strategies will fail identically the
+second time, while an operator who can see the screen gets past a relabelled button
+in seconds. With nobody available it stays a hard failure with the strategy count
+intact, which is the debuggable form. Evidence run 03 is a genuine discovery run
+where a weaker model could not authenticate and called `escalate` rather than
+thrashing.
 
 **The control-transfer model** is a lease with exactly one holder — `automation`,
 `operator`, or `none` — checked by the adapter before every mutating command, and
@@ -204,17 +243,53 @@ AutomationDriving ──requestIntervention()──► PauseRequested
        └──── ResumeAccepted ◄── HandbackRequested ◄──── operator done ────┘
 ```
 
-When policy requires approval, replay captures a screenshot, writes an
-`InterventionRaised` event carrying the capability, step id, intent, and reason, and
-returns `Escalated { interventionId }` — deliberately outside the success/failure
-axis, with its own CLI exit code.
+**An escalation is a call that blocks, not an error that propagates.** This is the
+design decision the rest of the section rests on. `Escalator.raise` returns the
+operator's decision, so "the run pauses, a human drives, the run resumes and
+completes" is literally what the code does rather than a description of what it
+implies. With no escalator configured, the same call site returns
+`Escalated { interventionId }` and ends the run — correct for an unattended batch
+replay, which has nobody to ask and should not pretend otherwise. The difference
+between attended and unattended operation is one optional dependency.
 
-**What is not built:** the co-browsing surface. The intended mechanism is CDP
-`Page.startScreencast` streamed over a WebSocket with `Input.dispatch*` forwarded
-back, so the operator drives the *same* page with the same cookies — not a fresh
-session. The lease, the pause point, the intervention record, and the evidence
-capture are all real; the pixels and the operator console are not. This is the
-largest gap in the submission and I would build it next.
+**The operator drives the same page**, over CDP `Page.startScreencast` out and
+`Input.dispatch*` in, on a WebSocket. Not a reconstruction: reproducing a legacy
+session in a second browser is the hard problem, and it would fail exactly when a
+takeover is needed. The intervention carries what a person needs to decide without
+asking anybody — the capability's goal, the step and its English intent, why it
+stopped, a redacted screenshot from the moment it paused, and the recent action
+log.
+
+**Handback is two genuinely different answers.** `skipStep` means *I did it*, and
+the automation must not repeat an irreversible action; `retryStep` means *I cleared
+the way*, and it should try again on a screen that has changed. The checkpoint
+still runs after a `skipStep` — trusting a human's word that the screen is where it
+should be is exactly the assumption checkpoints exist to remove, and it is no more
+warranted there than for the automation. Handbacks per step are bounded, because a
+person answering "try again" to a step policy will refuse again is a loop with a
+human in it.
+
+**A dropped socket returns the session to the queue; it never resumes the run.** An
+operator whose laptop slept mid-form decided nothing, and inferring a decision from
+a disconnect is how automation completes a transfer a person abandoned halfway.
+
+**What the operator did is captured twice** — as coordinates, which is what
+actually happened, and as role plus name read back from the accessibility tree,
+which is the only form an artifact step can be written in. A log of pixel positions
+is faithful and unpromotable.
+
+The control lease is *derived* from the state machine above and never assigned, so
+the bug class where a console says "you have control" while the surface disagrees
+is unrepresentable rather than merely tested for. Two defects only a real socket
+surfaced: messages were handled concurrently, so a mouse-up overtook its mouse-down
+and the click silently did nothing; and the click target was described *after*
+dispatch, by which time the navigation had destroyed the node, leaving every
+captured action with a coordinate and no name.
+
+The whole loop is proven by an integration test that takes no shortcuts — a real
+Chromium, a real screencast, real input at coordinates read from the accessibility
+tree, and the real executor blocked on the real intervention — and by driving it by
+hand through the console.
 
 ---
 
@@ -237,11 +312,22 @@ irreversible button and told to escalate. An unsupervised model should not be th
 last actor before an irreversible financial action. In replay the same condition
 becomes an approval request, because by then a human has reviewed the artifact.
 
+**One asymmetry during takeover is deliberate.** An operator's *click* is
+classified and recorded but never refused — the intervention usually exists
+precisely so a person can press the button policy would not, and blocking them
+would make takeover useless at the moment it matters. An operator's *navigation*
+**is** checked against the same allowlist as the automation, because otherwise the
+takeover channel is an exfiltration path off a machine that holds banking
+credentials by design. An irreversible action taken by hand is written as its own
+audit event.
+
 **Redaction runs on the way in, not on the way out.** Every write to evidence passes
 through the redactor, so there is no path that puts regulated data on disk. Two
 mechanisms, because neither suffices: pattern-based (SSN, Luhn-checked card numbers,
 emails, long digit runs) catches what we did not know was there; value-based masks
-exactly what the capability *declared* sensitive.
+exactly what the capability *declared* sensitive. A mask carries the *name* of the
+declaring field — `[redacted:memberId]`, not `[redacted]` — which leaks nothing the
+artifact does not already publish and makes the evidence readable to an auditor.
 
 **The compiler refuses to emit an artifact containing a declared secret.** This is a
 whole-artifact scan rather than a list of checked fields, and it exists because the
@@ -249,6 +335,14 @@ first real discovery run put an operator id into a *checkpoint* — the value ch
 was correctly a secret reference, but nobody had thought about `expect: "teller01"`.
 The list of routes a credential can take is exactly the kind of thing that grows a
 new member later.
+
+**It also refuses to emit an artifact containing a redaction marker**, which is the
+same shape of defence and was found the same way. A recording is evidence, and
+evidence is redacted on the way to disk — so recompiling one produced an anchor
+reading `S-0001-[redacted:declared]`: not a leak and not a crash, but a capability
+that compiles, commits, reviews cleanly and resolves nothing. Labelled masks let
+the compiler turn `[redacted:memberId]` straight back into `{{memberId}}` without
+ever seeing the value; the scan catches the case where it cannot.
 
 **Limits, stated plainly.** Regex redaction has false negatives — an account-number
 format we have not seen gets through. The model sees unredacted page content in
@@ -265,26 +359,38 @@ implementation; a real deployment would put a managed secret store behind it.
 
 ## 7. Cuts
 
-**What is built and tested** (108 tests, no database or API key required): the
-discovery loop against a real application with a real model, the artifact schema,
-deterministic replay with the full error taxonomy, the policy chokepoint,
-redaction, evidence, and the CLI.
+**What is built and tested** (172 tests, no database or API key required): the
+discovery loop against a real application with a real model; the artifact schema;
+deterministic replay with the full error taxonomy; live takeover over a CDP
+screencast with a real, enforced control lease; the typed HTTP API and the operator
+console; per-tenant overlays, with one artifact proven against two institutions;
+per-tenant drift telemetry; the agent-facing capability catalog; the policy
+chokepoint; redaction; evidence; and the CLI.
 
 **What is deliberately not built:**
 
-- **The co-browsing operator surface.** The seam is real and enforced; the screencast
-  is not. Biggest gap, and the first thing I would build.
-- **The operator console UI.** `apps/web` is scaffolded to the intended structure and
-  empty. The brief permits mocking this; I would rather ship an honest seam than a
-  screenshot of one.
-- **Postgres persistence.** The schema and test harness are set up and unused —
-  artifacts live in git (which is where reviewable things belong) and runs currently
-  live in `evidence/`. Wiring the database would add setup friction for a reviewer
-  and prove nothing the brief asks about.
-- **Multi-tenant demonstration.** The overlay merge is implemented and unit-tested;
-  replaying against `riverbend` is a short piece of work I did not get to.
-- **The agent-facing capability catalog.** The typed inputs are already there and
-  generating tool declarations from them is small; nothing consumes them yet.
+- **Postgres persistence.** `packages/store` has a schema and a test harness and is
+  unused. Artifacts live in git, which is where reviewable things belong, and runs
+  live in `evidence/` — read back by the console, so what an operator sees is
+  exactly what an auditor would find, with no second copy to disagree. The seam for
+  a database is `apps/orchestrator/src/server/repositories.ts`, and it belongs there
+  the day runs need querying across machines rather than listing from one. Wiring it
+  now would add setup friction for a reviewer and prove nothing the brief asks
+  about.
+- **Masking sensitive regions of a screenshot before capture.** Pixels are not
+  strings and the redactor cannot mask them after the fact, which is why screenshots
+  are captured sparingly — on failures and escalations, where the debugging value is
+  highest. The artifact already declares which fields are sensitive, so the
+  information needed to do it exists; the work does not.
+- **Promoting an operator's actions into a new artifact version.** The capture is
+  there and is deliberately symbolic (role plus name, not just coordinates) so that
+  it *could* be, but the promotion itself — a reviewed draft version — is not built.
+  Doing it automatically would be wrong; doing it well needs a diff UI.
+- **Authentication on the console.** It is an internal tool bound to loopback with a
+  permissive CORS policy, and the thing actually guarding the automation is the
+  policy chokepoint rather than the browser's origin check. A real deployment needs
+  operator identity for the audit trail to mean anything — the log already records
+  *who*, it just takes their word for it.
 
 **One known imperfection in the shipped artifact.** Evidence run 06 reports
 `TargetNotFound` where a `MemberNotFound` business outcome would be better. The
@@ -294,12 +400,22 @@ recorded the shipped artifact declared none, so replay honestly reports that it
 could not find what the step needed rather than inventing an answer. The failure is
 accurate; the artifact is incomplete. Free-tier quota (~20 requests per model per
 day, a run costing about a dozen) ran out before I could re-record it with a better
-model.
+model. `cua recompile` is faithful now, so a better recording drops straight in.
 
-**What I would do next, in order:** the live takeover; a `MemberNotFound` re-record;
-the riverbend overlay replay; then the capability catalog. After that, masking
-screenshot regions from the declared sensitivity, and an assisted single-step LLM
-recovery on replay failure — bounded, policy-checked, and recorded as evidence.
+**One framework concession.** `apps/web` builds with webpack rather than Turbopack.
+Every workspace package is source-only under NodeNext, whose `.js` specifiers point
+at `.ts` files, and Turbopack has no extension-alias setting to teach it that.
+Webpack's `resolve.extensionAlias` is exactly the missing piece. The alternative — a
+build step for `@workspace/contracts` — would put a stale-able artifact between the
+contract and the client that decodes with it, which is the one thing this design is
+trying not to have.
+
+**What I would do next, in order:** re-record with a stronger model to get the
+declared outcome; promotion of an operator's fix into a reviewed draft version;
+masking screenshot regions from the declared sensitivity; then an assisted
+single-step LLM recovery on replay failure — bounded, policy-checked, and recorded
+as evidence, which is the only shape in which a model belongs anywhere near the
+replay path.
 
 **A note on how this was built.** Several of the design decisions above are
 corrections. The resolver first treated a bare role as a strategy, which made every
@@ -308,4 +424,8 @@ that `ariaSnapshot` hides, so no relational anchor resolved until the raw CDP tr
 was dumped. An attempt to strip a data-valued name from a descriptor was made in the
 compiler, where it silently weakened a descriptor the recorder had already *verified*
 as unique — the compiler has no page in front of it and must not second-guess a
-verified recording. Each of those is now a test.
+verified recording. A run had two ids, one from the caller that opened the evidence
+directory and one the executor generated, so every screenshot reference in an
+intervention pointed at a directory that did not exist. And an overlay pointed at a
+second institution changed a field nothing read, because the recording had written
+its opening URL out as a literal. Each of those is now a test.

@@ -8,7 +8,8 @@ artifact **deterministically, with no model in the decision loop**.
 > replay is how the AI agent invokes it.
 
 The design write-up is [`REPORT.md`](./REPORT.md). Worked examples of every path —
-discovery, replay, reuse, escalation, and three distinct failure modes — are in
+discovery, replay, reuse, escalation, three distinct failure modes, and the same
+artifact running against two institutions — are in
 [`evidence/`](./evidence/README.md).
 
 ---
@@ -22,8 +23,8 @@ pnpm install
 pnpm --filter @workspace/surface exec playwright install chromium
 ```
 
-That is everything the tests and the replay demo need. No database, no API key,
-no Docker.
+That is everything the tests and the demo need. No database, no API key, no
+Docker.
 
 A Gemini API key is needed **only** to run `cua discover` yourself:
 
@@ -43,7 +44,7 @@ discovery run costs about a dozen. `GEMINI_MODEL` selects the model; see
 pnpm test
 ```
 
-108 tests. They start the stand-in application themselves on an ephemeral port and
+172 tests. They start the stand-in application themselves on an ephemeral port and
 drive a real Chromium, so this exercises nearly the whole system without any
 external service:
 
@@ -53,6 +54,11 @@ external service:
 | `packages/policy` | Allowlist, risk classification, redaction |
 | `packages/engine` (discovery) | The agent loop, policy chokepoint, step recording, descriptor synthesis |
 | `packages/engine` (replay) | **Every branch of the result contract** — success, business outcomes, recoveries, hard failures |
+| `packages/engine` (tenants) | **One artifact replaying against both institutions** |
+| `packages/engine` (control state) | Every legal and illegal transfer of control, including races a browser cannot be made to produce on demand |
+| `packages/engine` (health, catalog) | The drift arithmetic, and the tool declarations an agent is handed |
+| `apps/orchestrator` (takeover) | **A live run pausing, a person driving it, and the run completing** |
+| `apps/orchestrator` (api) | The typed API through the real derived client into the real handlers |
 | `apps/target-corebank` | The stand-in itself, including every injectable fault |
 
 `pnpm typecheck` and `pnpm lint` should both be clean.
@@ -91,7 +97,7 @@ pnpm --filter orchestrator run cua replay \
   …
   s7   Extracting the savings balance for the member.
 
-result      Succeeded in 2271ms
+result      Succeeded in 2195ms
 outputs
   savingsBalance = $4,812.65
 ```
@@ -100,7 +106,29 @@ Credentials come from the environment, never from the artifact — grep
 `capabilities/lookupMemberSavingsBalance@1.0.0.json` for `teller01` and you will
 find nothing.
 
-### 3. The parts worth actually looking at
+### 3. The same artifact, a second institution
+
+```bash
+… cua replay --capability "lookupMemberSavingsBalance@1.0.0" \
+    --input memberId=12345 --tenant riverbend
+```
+
+```
+tenant      riverbend via overlay · {{baseUrl}}/riverbend/login
+…
+result      Succeeded in 2240ms
+outputs
+  savingsBalance = $4,812.65
+```
+
+Riverbend labels the member field `Member #` rather than `Member Number`, captions
+the button `Find Member` rather than `Search`, wraps its content in an extra table
+and runs a different product version.
+[`capabilities/overlays/lookupMemberSavingsBalance@1.0.0.riverbend.json`](./capabilities/overlays/)
+names two controls and an entry point. Nothing is re-recorded, and the artifact
+that ran records which institution produced the answer.
+
+### 4. The parts worth actually looking at
 
 **Reuse.** The same artifact, a member it was never recorded against:
 
@@ -132,7 +160,82 @@ Other faults you can arm the same way: `session-expired`, `interstitial`, `slow`
 Exit codes distinguish the branches for a shell caller:
 **0** succeeded, **1** failed, **2** escalated, **3** business outcome.
 
-### 4. Run discovery yourself (needs a key)
+**Drift telemetry.** `--update-health` accumulates per-step, per-tenant fallback
+rates back onto the artifact, and names the steps that need an overlay entry:
+
+```bash
+… cua replay … --tenant riverbend --update-health
+```
+
+### 5. What an AI agent is handed
+
+```bash
+pnpm --filter orchestrator run cua catalog          # human-readable
+pnpm --filter orchestrator run cua catalog --json   # tool-declaration form
+```
+
+```
+lookupMemberSavingsBalance(
+  memberId: string  // matches ^\d+$
+)
+  Looked up member <memberId> and extracted their savings balance.
+  Returns: savingsBalance (string). Status: draft — not yet approved for
+  unattended use of anything beyond safe actions.
+```
+
+Every field is derived from the artifact, so what an agent believes it can do
+cannot drift from what the system will execute. The `--json` form is exactly what
+Gemini's `parametersJsonSchema` takes.
+
+---
+
+## The operator console
+
+Three terminals:
+
+```bash
+pnpm --filter target-corebank dev                        # the legacy app, :4100
+
+CUA_SECRET_OPERATORID=teller01 CUA_SECRET_OPERATORPASSWORD=demo-pass \
+  pnpm --filter orchestrator dev                         # API + evidence, :4000
+
+pnpm --filter web dev                                    # console, :3000
+```
+
+<http://localhost:3000> gives you the capability catalog, the artifact rendered
+for review (with a per-institution view that re-resolves it through that tenant's
+overlay), a run and evidence viewer, the intervention inbox, and a playground that
+invokes a capability the way an agent would.
+
+### Live takeover
+
+Start a run from the console with **“wait for a person if it gets stuck”** on, or
+from the CLI:
+
+```bash
+… cua replay --capability "lookupMemberSavingsBalance@1.0.0" \
+    --input memberId=99999 --live
+```
+
+The run reaches a step it cannot resolve, pauses, and prints a
+`ws://…/takeover` URL. Open the intervention in the console and you get the live
+page over a CDP screencast, with why it stopped, the step and its English intent,
+a screenshot from the moment it paused, and the last few things the automation
+did. **Take control** and you are driving the same browser — same cookies, same
+half-filled form — with your clicks and keystrokes forwarded as real input
+events. While you hold it, the automation is *refused*, not merely paused.
+
+Hand back with **“I did this step”** (the automation must not repeat an
+irreversible action) or **“I cleared the way”** (it should try again on a screen
+that has changed), and the run continues. Everything you did is captured as
+coordinates *and* as role plus name — the second is what would let an operator's
+fix become a new artifact version.
+
+---
+
+## Recording and re-compiling
+
+### Run discovery yourself (needs a key)
 
 ```bash
 pnpm --filter orchestrator run cua discover \
@@ -149,11 +252,11 @@ pnpm --filter orchestrator run cua discover \
 This overwrites `capabilities/lookupMemberSavingsBalance@1.0.0.json` and writes a
 new run under `evidence/`.
 
-### 5. Re-emit an artifact without calling a model
+### Re-emit an artifact without calling a model
 
 ```bash
 pnpm --filter orchestrator run cua recompile \
-  --run ../../evidence/01-discovery-produces-the-capability/run.json \
+  --run evidence/01-discovery-produces-the-capability/run.json \
   --name lookupMemberSavingsBalance \
   --param memberId=12345 \
   --secret operatorId=teller01 --secret operatorPassword=demo-pass
@@ -161,7 +264,13 @@ pnpm --filter orchestrator run cua recompile \
 
 Discovery saves the raw recording, so an improved compiler can be applied to
 capabilities that already exist. Re-running the model instead would be expensive
-*and* non-deterministic — a second run explores differently.
+*and* non-deterministic — a second run explores differently. The shipped artifact
+was regenerated this way after the compiler learned to reference the entry point
+rather than repeat it, which is what made the tenant overlay work at all.
+
+A test asserts this command is a no-op against the committed artifact — that the
+file in `capabilities/` is exactly what the compiler emits from the recording in
+`evidence/`, and so was not hand-edited.
 
 ---
 
@@ -170,24 +279,29 @@ capabilities that already exist. Re-running the model instead would be expensive
 ```
 apps/
   target-corebank/   the legacy application being automated (the stand-in)
-  orchestrator/      the `cua` CLI
-  web/               operator console (Next.js) — not yet built out
+  orchestrator/      the `cua` CLI, the typed HTTP API, the takeover gateway
+  web/               operator console (Next.js)
 packages/
-  contracts/         the artifact schema, action model, result contract
+  contracts/         the artifact schema, action model, result contract, the API
   surface/           the Surface abstraction + the Playwright/CDP adapter
   policy/            allowlist, risk classification, redaction
-  engine/            discovery loop, replay executor, evidence
-  store/             Prisma schema and test harness — not yet used
-capabilities/        capability artifacts, committed and reviewable
+  engine/            discovery loop, replay executor, sessions, evidence, catalog
+  store/             Prisma schema and test harness — set up, not used
+capabilities/        capability artifacts and per-tenant overlays, committed
 evidence/            worked examples of every path
 ```
 
 ## Where things stand
 
-Built and tested: the discovery loop, the artifact schema, deterministic replay
-with the full error taxonomy, the policy chokepoint and redaction, and evidence.
+**Built and tested:** the discovery loop against a real application with a real
+model; the artifact schema; deterministic replay with the full error taxonomy;
+live takeover over CDP screencast with a real control lease; the typed HTTP API
+and the operator console; per-tenant overlays with one artifact proven against two
+institutions; per-tenant drift telemetry; the agent-facing capability catalog; the
+policy chokepoint and redaction; and evidence for all of it.
 
-Not yet built: the operator console UI, the live-takeover screencast (the control
-lease and escalation seam exist and are enforced; the co-browsing surface is not),
-multi-tenant overlay demonstration, and the database-backed persistence. See the
-Cuts section of `REPORT.md`.
+**Not built:** Postgres persistence (`packages/store` is set up and unused —
+artifacts live in git, which is where reviewable things belong, and runs live in
+`evidence/`), and masking sensitive regions of a screenshot before capture. See
+the Cuts section of `REPORT.md` for why, and for the one known imperfection in the
+shipped artifact.

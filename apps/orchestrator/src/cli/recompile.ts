@@ -123,10 +123,28 @@ export const recompile = async (options: RecompileOptions): Promise<number> => {
     discoveredAt: await discoveredAtOf(runFile),
   })
 
-  const encoded = await Effect.runPromise(encodeCapability(artifact))
-
   await mkdir(CAPABILITIES_DIR, { recursive: true })
   const path = join(CAPABILITIES_DIR, `${options.name}@${options.version}.json`)
+
+  /**
+   * Carry the replay telemetry over.
+   *
+   * A recompile overwrites the same capability at the same version from the same
+   * recording, so the drift history it has accumulated is still about these
+   * steps — `fallbackHitRate` is keyed by step id, and step ids come from the
+   * recording. Emitting a fresh `Health` would silently reset every tenant's
+   * drift record, and the first anyone would know is that the alarm had stopped
+   * firing.
+   */
+  const existingHealth = await readFile(path, "utf8")
+    .then((current) => (JSON.parse(current) as { health?: unknown }).health)
+    .catch(() => undefined)
+
+  const encoded = {
+    ...(await Effect.runPromise(encodeCapability(artifact))),
+    ...(existingHealth ? { health: existingHealth } : {}),
+  }
+
   await writeFile(path, `${JSON.stringify(encoded, null, 2)}\n`, "utf8")
 
   console.log(`recompiled  ${path}`)
@@ -137,6 +155,9 @@ export const recompile = async (options: RecompileOptions): Promise<number> => {
   console.log(
     `outcomes    ${artifact.outcomes.map((o) => o.tag).join(", ") || "(none)"}`
   )
+  if (existingHealth) {
+    console.log("health      carried over from the previous file")
+  }
 
   return 0
 }

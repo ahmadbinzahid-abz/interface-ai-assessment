@@ -5,9 +5,8 @@ write-up is `/REPORT.md`.
 
 ## Start here (resuming in a fresh session)
 
-Phases 0–7 are done; `/README.md` and `/REPORT.md` are written (they predate
-Phases 5–7 and need a takeover section, a console section, and the tenant-overlay
-result). `pnpm test` runs 170 tests with no database and no API key.
+**All eight phases are done.** `pnpm test` runs 172 tests with no database and no
+API key; `pnpm typecheck` and `pnpm lint` are clean.
 
 To see the whole thing, three terminals:
 
@@ -18,15 +17,17 @@ CUA_SECRET_OPERATORID=teller01 CUA_SECRET_OPERATORPASSWORD=demo-pass \
 pnpm --filter web dev                              # console, :3000
 ```
 
-Remaining, in the order I would do them:
+`/README.md`, `/REPORT.md` and `evidence/README.md` describe what is actually
+built, and every command in the README was run as written before it was
+committed.
 
-1. **Update `/README.md` and `/REPORT.md`** — §3.6 with the live takeover that now
-   exists, §3.5 with the console and evidence viewer, §3.7 with evidence runs 09
-   and 10. This is the last thing actually owed; everything it describes is built.
-2. **Re-record the capability** when quota resets, with a model strong enough to
-   declare a `MemberNotFound` outcome — see the known imperfection below. The
-   recompile path is faithful now, so a better recording can be dropped in
-   without re-deriving anything by hand.
+The one thing still outstanding, and it needs quota rather than work:
+
+1. **Re-record the capability** with a model strong enough to declare a
+   `MemberNotFound` outcome — see the known imperfection below. `cua recompile`
+   is faithful now and there is a test asserting the shipped artifact is exactly
+   what the compiler emits from the committed recording, so a better recording
+   drops straight in.
 
 Read `AGENTS.md` for conventions before writing code.
 
@@ -255,7 +256,7 @@ adding an outcome to a capability breaks the build until the UI handles it.
 | 5 ✅ | Session manager, control lease, intervention API, WS screencast + input forwarding, operator capture, handback | Live run pauses → human drives → hands back → run completes |
 | 6 ✅ | Typed HTTP API; operator console: catalog, run/evidence viewer, intervention inbox, take-control, playground | Console drives a paused run to completion |
 | 7 ✅ | Tenant overlay merge, per-tenant drift telemetry, capability catalog as tool declarations | One artifact replays on both tenant variants |
-| 8 ◐ | `/README.md`, `/REPORT.md` (their exact seven headings), `/evidence/` with discovery run + happy replay + **failing replay** | Tests green, `tsc --noEmit` clean |
+| 8 ✅ | `/README.md`, `/REPORT.md` (their exact seven headings), `/evidence/` with discovery run + happy replay + **failing replay** | Tests green, `tsc --noEmit` clean |
 
 ## 9. Fault matrix (target app → requirement)
 
@@ -578,7 +579,7 @@ is trying not to have.
 
 ## 10g. Phase 7 status
 
-**Phase 7 — complete.** 170 tests. The gate is met twice over: an integration suite
+**Phase 7 — complete.** 172 tests. The gate is met twice over: an integration suite
 that replays one artifact against both tenants of the stand-in, and two committed
 evidence directories (`09-`, `10-`) from real CLI runs of the *shipped* capability
 against both installs. Both return `$4,812.65`; the Riverbend run carries

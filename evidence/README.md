@@ -4,12 +4,15 @@ Every run here is real, against the live stand-in application
 (`apps/target-corebank`). The discovery runs called Gemini; the replay runs
 called nothing at all. Nothing has been edited by hand.
 
+Runs `01`–`08` are the discovery-to-replay thread and the error taxonomy; `09`
+and `10` are the same capability against two different institutions.
+
 Each directory contains:
 
 | File | What it is |
 |---|---|
 | `trace.jsonl` | The structured log: what happened, **why** — each step's intent — what policy decided, and which locator strategy resolved. Written through the redactor, so declared sensitive values never reach it. |
-| `run.json` | The raw recording (discovery), so an artifact can be re-compiled after a compiler change without paying for another model run. |
+| `run.json` | The raw recording (discovery), so an artifact can be re-compiled after a compiler change without paying for another model run. It is redacted like everything else here — each mask carries the name of the field it replaced (`[redacted:memberId]`), which is what lets the compiler turn it back into a reference without ever seeing the value. |
 | `result.json` | The full typed result (replay). |
 | `capability.json` | The compiled capability, as that run emitted it. |
 | `failure-*.png` | Screenshot captured at the point of failure. |
@@ -29,6 +32,15 @@ Worth checking in the artifact:
 - The balance cell is targeted as *"the cell right of account number
   `S-0001-{{memberId}}`, second one"* — **not** by the balance it happened to
   read. That distinction is what makes 05 possible.
+- The first step navigates to `{{entryPoint}}` rather than to a URL. That
+  indirection is what makes 09 possible: an overlay changes the entry point and
+  the step follows it.
+
+The shipped artifact was re-emitted from *this* recording after the compiler
+learned to reference the entry point instead of repeating it — no model was
+called. That is what `run.json` is for, and a test asserts the committed artifact
+is still byte-identical to what the current compiler produces from it: proof that
+nobody hand-edited the file and that the compiler is deterministic.
 
 ### 02 — discovery declares a business outcome
 
