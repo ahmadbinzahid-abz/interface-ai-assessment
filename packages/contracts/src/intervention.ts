@@ -74,6 +74,31 @@ export const controlHolderOf = (
   }
 }
 
+/**
+ * The state in words, for anything that shows it to a person.
+ *
+ * Here rather than in the engine because the console needs it and the console
+ * must not depend on the engine — that package carries Playwright and a model
+ * client, neither of which belongs in a browser bundle. A pure function over a
+ * contract type belongs with the contract.
+ */
+export const describeControlState = (state: ControlState): string => {
+  switch (state._tag) {
+    case "Idle":
+      return "idle"
+    case "AutomationDriving":
+      return `automation ${state.runId} is driving`
+    case "PauseRequested":
+      return "pausing — finishing the action in flight"
+    case "AwaitingOperator":
+      return "paused, waiting for an operator"
+    case "OperatorDriving":
+      return `${state.operatorId} is driving`
+    case "HandbackRequested":
+      return `${state.operatorId} handed back (${state.disposition})`
+  }
+}
+
 // ── Why a run stopped ────────────────────────────────────────────────────
 
 /**

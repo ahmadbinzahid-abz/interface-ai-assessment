@@ -205,7 +205,12 @@ export const replay = async (options: ReplayOptions): Promise<number> => {
     const result = await Effect.runPromise(
       runReplay(
         { surface, evidence, allowlist, lease, vault, escalator, session },
-        { artifact, inputs: options.inputs, baseUrl: options.baseUrl }
+        {
+          artifact,
+          inputs: options.inputs,
+          baseUrl: options.baseUrl,
+          runId,
+        }
       )
     )
 

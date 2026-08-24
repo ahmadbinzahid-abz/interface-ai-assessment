@@ -100,6 +100,15 @@ export interface ReplayRequest {
   readonly inputs: Record<string, string>
   /** Which institution's install to run against. Substituted for `{{baseUrl}}`. */
   readonly baseUrl: string
+  /**
+   * The id this run is already known by.
+   *
+   * A caller that has opened an evidence directory has *already* named the run,
+   * and generating a second name here means the interventions, the trace and the
+   * directory disagree about what to call the same thing — which is exactly how
+   * an evidence link stops resolving. One run, one id.
+   */
+  readonly runId?: string
 }
 
 /** Conditions every application exhibits, whether or not an artifact declared them. */
@@ -135,7 +144,9 @@ const executeReplay = (
   Effect.gen(function* () {
     const { artifact, inputs, baseUrl } = request
 
-    const runId = `replay-${new Date().toISOString().replace(/[:.]/g, "-")}`
+    const runId =
+      request.runId ??
+      `replay-${new Date().toISOString().replace(/[:.]/g, "-")}`
     const actor: Actor = { _tag: "automation", runId }
     const startedAt = Date.now()
 
@@ -484,6 +495,32 @@ const executeReplay = (
         }).pipe(Effect.either)
 
         if (performed._tag === "Left") {
+          /**
+           * Resolution can fail *inside* an action too, not only before it.
+           *
+           * A descriptor that resolved to a coordinate and then could not be
+           * read is the same condition as one that never resolved — the UI has
+           * moved — and it deserves the same answer. Missing this is why an
+           * escalating run could still end as a bare `TargetNotFound`: the
+           * escalation hook covered one of the two places it can happen.
+           *
+           * Deliberately narrow. A dead browser or an unresolvable parameter is
+           * not something an operator can fix by looking at the screen, so those
+           * stay hard failures.
+           */
+          const kind = performed.left._tag
+
+          if (
+            escalator &&
+            (kind === "TargetNotFound" || kind === "AmbiguousTarget")
+          ) {
+            return yield* escalate(
+              step,
+              kind === "AmbiguousTarget" ? "ambiguousTarget" : "targetNotFound",
+              `Step ${step.id} could not act on its target: ${kind}.`
+            )
+          }
+
           yield* captureScreenshot(`failure-${step.id}`)
           return { _tag: "stop", result: failed(performed.left) }
         }

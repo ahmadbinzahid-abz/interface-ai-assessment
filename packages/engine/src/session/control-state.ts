@@ -1,5 +1,8 @@
 import type { ControlState } from "@workspace/contracts"
 
+// Re-exported so engine consumers keep one import site for the state machine.
+export { describeControlState } from "@workspace/contracts"
+
 /**
  * The control-transfer state machine, as a pure function.
  *
@@ -158,20 +161,3 @@ export const pendingInterventionId = (
   state._tag === "HandbackRequested"
     ? state.interventionId
     : undefined
-
-export const describeControlState = (state: ControlState): string => {
-  switch (state._tag) {
-    case "Idle":
-      return "idle"
-    case "AutomationDriving":
-      return `automation ${state.runId} is driving`
-    case "PauseRequested":
-      return "pausing — finishing the action in flight"
-    case "AwaitingOperator":
-      return "paused, waiting for an operator"
-    case "OperatorDriving":
-      return `${state.operatorId} is driving`
-    case "HandbackRequested":
-      return `${state.operatorId} handed back (${state.disposition})`
-  }
-}

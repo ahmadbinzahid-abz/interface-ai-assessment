@@ -5,23 +5,29 @@ write-up is `/REPORT.md`.
 
 ## Start here (resuming in a fresh session)
 
-Phases 0–5 are done; `/README.md` and `/REPORT.md` are written (they predate
-Phase 5 and need a takeover section). `pnpm test` runs 132 tests with no database
-and no API key.
+Phases 0–6 are done; `/README.md` and `/REPORT.md` are written (they predate
+Phases 5–6 and need a takeover section and a console section). `pnpm test` runs
+144 tests with no database and no API key.
+
+To see the whole thing, three terminals:
+
+```
+pnpm --filter target-corebank dev                  # the legacy app, :4100
+CUA_SECRET_OPERATORID=teller01 CUA_SECRET_OPERATORPASSWORD=demo-pass   pnpm --filter orchestrator dev                   # API + evidence, :4000
+pnpm --filter web dev                              # console, :3000
+```
 
 Remaining, in the order I would do them:
 
-1. **Operator console (Phase 6).** The gateway, the protocol and the intervention
-   inbox exist and are typed; nothing renders them. `features/interventions/
-   live-control/` is where the screencast `<img>` and input forwarding go, and
-   the protocol in `packages/contracts/src/takeover.ts` is the contract to build
-   against.
+1. **Tenant overlay end to end (Phase 7).** The merge is implemented and
+   unit-tested; replaying one artifact against both tenant variants is the §3.7
+   gate and is not done. The capability catalog as Gemini function declarations
+   sits alongside it and is nearly free — the API already serves the typed
+   contract the declarations would be generated from.
 2. **Re-record the capability** when quota resets, with a model strong enough to
    declare a `MemberNotFound` outcome — see the known imperfection below.
-3. **Replay against the second tenant** through an overlay. The merge is
-   implemented and unit-tested; the end-to-end demonstration is not done.
-4. **Tenant overlay + capability catalog (Phase 7)**, then update `/REPORT.md`
-   §3.6 with the takeover design that now exists.
+3. **Update `/REPORT.md`** §3.6 with the takeover design that now exists, and
+   add the console to §3.5.
 
 Read `AGENTS.md` for conventions before writing code.
 
@@ -248,7 +254,7 @@ adding an outcome to a capability breaks the build until the UI handles it.
 | 3 ✅ | Discovery loop (Gemini tool use), policy chokepoint, evidence writer, artifact compiler (parameterization + checkpoint inference) | **One real LLM run** completes the goal and emits an artifact into `/evidence/` |
 | 4 ✅ | Replay engine: executor, detection ordering, recovery layer, result contract, output extraction | Happy path + all seven fault paths hit the correct branch of the result union |
 | 5 ✅ | Session manager, control lease, intervention API, WS screencast + input forwarding, operator capture, handback | Live run pauses → human drives → hands back → run completes |
-| 6 | Operator console: catalog, run/evidence viewer, intervention inbox, take-control, playground | — |
+| 6 ✅ | Typed HTTP API; operator console: catalog, run/evidence viewer, intervention inbox, take-control, playground | Console drives a paused run to completion |
 | 7 | Tenant overlay merge, drift telemetry, capability catalog as Gemini function declarations + demo invocation | One artifact replays on both tenant variants |
 | 8 ◐ | `/README.md`, `/REPORT.md` (their exact seven headings), `/evidence/` with discovery run + happy replay + **failing replay** | Tests green, `tsc --noEmit` clean |
 
@@ -508,6 +514,68 @@ pnpm --filter orchestrator run cua replay   --capability lookupMemberSavingsBala
 ```
 
 It prints a `ws://…/takeover` URL and blocks when it needs a person.
+
+## 10f. Phase 6 status
+
+**Phase 6 — complete.** 144 tests. `packages/contracts/src/api.ts` is the API as a
+*value*; `apps/orchestrator/src/server` implements it; `apps/web` consumes a client
+derived from the same value. Nothing is hand-written between them, so they cannot
+drift.
+
+The console is proven the same way the engine is — by driving it. A live run was
+started through the API, paused at a step it could not resolve, and an operator
+took control **through the browser console**, clicked a control on the live
+legacy page, saw it captured as `click · Search`, and handed the run back. The
+screencast, the input forwarding and the control lease all work end to end
+through the UI, not just through the integration test.
+
+Decisions worth keeping:
+
+- **The read model reads what already exists.** Capabilities are files in
+  `capabilities/`; runs are the evidence directories the run itself wrote,
+  redacted on the way in. No second copy in Postgres to disagree with the
+  evidence an auditor would find. `repositories.ts` is the seam where a database
+  belongs the day runs need querying across machines.
+- **`Effect.either` at every hook boundary.** A typed failure becomes a value in
+  the success channel, so `RunNotFound` reaches JSX with its type intact. That
+  keeps transport state (`isPending`, network down) and domain state (the server
+  answered "no such run") on separate axes — conflating them is why so many
+  consoles show a red banner for an ordinary 404.
+- **`Match.exhaustive` over the result union in the UI.** Adding a branch to
+  `ReplayResult` or an error to an endpoint breaks the console build until a
+  human decides what it looks like. A business outcome gets a neutral card, not
+  a red one, for the same reason the executor returns it as data.
+- **Starting a run answers 202 with a run id.** A replay that may wait minutes on
+  a person is the wrong shape for a held-open HTTP request.
+
+### Three defects found by running it
+
+1. **A run had two ids.** The orchestrator named the evidence directory and the
+   executor generated its own, so every screenshot reference in an intervention
+   pointed at a directory that did not exist. `ReplayRequest.runId` now carries
+   the caller's name through. One run, one id.
+2. **The trace header stopped being the first line.** A live run writes a control
+   transition before `ReplayStarted`, so every live run appeared in the console
+   with no capability name. The header is now *found* by its `kind` rather than
+   assumed to be first — and there is a test whose fixture puts a transition
+   first on purpose.
+3. **Escalation covered one of the two places resolution can fail.** A descriptor
+   that resolved to a coordinate and then could not be read failed *inside* the
+   action, which never reached the escalation hook — so a live run still ended as
+   a bare `TargetNotFound` instead of asking the operator who was watching. Both
+   paths now escalate, and only for the "UI moved" family: a dead browser is not
+   something a person can fix by looking at the screen.
+
+### The one framework concession
+
+`apps/web` builds with **webpack rather than Turbopack**. Every workspace package
+is source-only with NodeNext resolution, which requires relative imports to carry
+an explicit `.js` extension pointing at a `.ts` file. Turbopack has no
+extension-alias setting and looks for a literal `.js`; webpack's
+`resolve.extensionAlias` is exactly the missing piece. The alternative — a build
+step for `@workspace/contracts` — would put a stale-able artifact between the
+contract and the client that decodes with it, which is the one thing this design
+is trying not to have.
 
 ## 10. Status log
 
