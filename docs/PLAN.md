@@ -3,6 +3,26 @@
 Internal working plan for the interface.ai take-home. Not a deliverable; the graded
 write-up is `/REPORT.md`.
 
+## Start here (resuming in a fresh session)
+
+Phases 0–4 are done and committed; `/README.md` and `/REPORT.md` are written.
+`pnpm test` runs 116 tests with no database and no API key.
+
+Remaining, in the order I would do them:
+
+1. **Live takeover (Phase 5).** The largest gap. The control lease is real and
+   enforced, escalation raises interventions carrying context and a screenshot —
+   the co-browsing surface (CDP `Page.startScreencast` + `Input.dispatch*` over a
+   WebSocket) is not built. §3.6 is a scored criterion and the brief says
+   explicitly "not just a TODO".
+2. **Re-record the capability** when quota resets, with a model strong enough to
+   declare a `MemberNotFound` outcome — see the known imperfection below.
+3. **Replay against the second tenant** through an overlay. The merge is
+   implemented and unit-tested; the end-to-end demonstration is not done.
+4. **Operator console (Phase 6)** and the **agent-facing capability catalog**.
+
+Read `AGENTS.md` for conventions before writing code.
+
 ## 0. The through-line
 
 > The model discovers once. The discovery is compiled into a typed artifact.
@@ -228,7 +248,7 @@ adding an outcome to a capability breaks the build until the UI handles it.
 | 5 | Session manager, control lease, intervention API, WS screencast + input forwarding, operator capture, handback | Live run pauses → human drives → hands back → run completes |
 | 6 | Operator console: catalog, run/evidence viewer, intervention inbox, take-control, playground | — |
 | 7 | Tenant overlay merge, drift telemetry, capability catalog as Gemini function declarations + demo invocation | One artifact replays on both tenant variants |
-| 8 | `/README.md`, `/REPORT.md` (their exact seven headings), `/evidence/` with discovery run + happy replay + **failing replay** | Tests green, `tsc --noEmit` clean |
+| 8 ◐ | `/README.md`, `/REPORT.md` (their exact seven headings), `/evidence/` with discovery run + happy replay + **failing replay** | Tests green, `tsc --noEmit` clean |
 
 ## 9. Fault matrix (target app → requirement)
 
