@@ -2,13 +2,15 @@ import { readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 import {
+  applyOverlay,
   CapabilityArtifact,
   decodeCapability,
   encodeCapability,
-  Health,
   type ReplayResult,
 } from "@workspace/contracts"
 import {
+  accumulateHealth,
+  driftingSteps,
   envVault,
   makeEvidenceWriter,
   runReplay,
@@ -22,6 +24,7 @@ import { chromium } from "playwright"
 
 import { CAPABILITIES_DIR, EVIDENCE_DIR } from "../paths.js"
 import { startLiveSession } from "../server/live-session.js"
+import { readOverlay } from "../server/repositories.js"
 
 /**
  * `cua replay` — the production execution path.
@@ -48,6 +51,14 @@ export interface ReplayOptions {
    */
   readonly live: boolean
   readonly waitMs?: number
+  /**
+   * Which institution's variant of the product to run against.
+   *
+   * Resolves the base capability through that tenant's overlay before executing.
+   * The point of the whole overlay mechanism is that this is the *only* thing
+   * that differs — one recording, one artifact, N thin files.
+   */
+  readonly tenant?: string
 }
 
 /** Exit codes distinguish the branches of the result union for a shell caller. */
@@ -112,7 +123,26 @@ export const replay = async (options: ReplayOptions): Promise<number> => {
     throw new Error(`No capability at ${path}. Run \`cua discover\` first.`)
   })
 
-  const artifact = await Effect.runPromise(decodeCapability(JSON.parse(raw)))
+  const base = await Effect.runPromise(decodeCapability(JSON.parse(raw)))
+
+  const [name, version] = options.capability.split("@")
+  const overlay = options.tenant
+    ? await Effect.runPromise(
+        readOverlay(name ?? "", version ?? "", options.tenant)
+      )
+    : undefined
+
+  if (options.tenant && !overlay) {
+    // Silence here would run the base artifact against the wrong institution and
+    // report a puzzling target failure. Saying so is cheaper than debugging it.
+    console.error(
+      `No overlay for tenant "${options.tenant}". Expected ` +
+        `capabilities/overlays/${options.capability}.${options.tenant}.json`
+    )
+    return EXIT.failed
+  }
+
+  const artifact = overlay ? applyOverlay(base, overlay) : base
 
   const origin = new URL(options.baseUrl).origin
   const allowlist = {
@@ -194,6 +224,11 @@ export const replay = async (options: ReplayOptions): Promise<number> => {
   console.log(
     `capability  ${artifact.name}@${artifact.version} (${artifact.status})`
   )
+  if (artifact.target.tenant) {
+    console.log(
+      `tenant      ${artifact.target.tenant} via overlay · ${artifact.target.entryPoint}`
+    )
+  }
   console.log(
     `inputs      ${Object.keys(options.inputs).join(", ") || "(none)"}`
   )
@@ -242,7 +277,9 @@ export const replay = async (options: ReplayOptions): Promise<number> => {
     const code = describe(result)
     await evidence.json("result", result)
 
-    if (options.updateHealth) await writeHealth(path, artifact, result)
+    if (options.updateHealth) {
+      await writeHealth(path, base, result, artifact.target.tenant ?? null)
+    }
 
     return code
   } finally {
@@ -258,44 +295,38 @@ export const replay = async (options: ReplayOptions): Promise<number> => {
 /**
  * Accumulate replay telemetry on the artifact.
  *
- * `fallbackHitRate` is the drift alarm: a step that used to resolve by role and
- * now resolves by its markup fallback still passes, but it is telling you this
- * install has changed. Off by default, because a read-only replay should not
- * rewrite a committed file unless someone asked it to.
+ * Written back onto the **base** capability, never the tenant-resolved one. The
+ * resolved artifact carries the overlay's tenant and entry point, so writing it
+ * back would quietly turn the shared base capability into Riverbend's — a
+ * one-line bug that would surface weeks later looking like a bad merge.
+ *
+ * Off by default, because a read-only replay should not rewrite a committed file
+ * unless somebody asked it to.
  */
 const writeHealth = async (
   path: string,
-  artifact: CapabilityArtifact,
-  result: ReplayResult
+  base: CapabilityArtifact,
+  result: ReplayResult,
+  tenant: string | null
 ): Promise<void> => {
-  const previous = artifact.health
-  const replays = (previous?.replays ?? 0) + 1
-  const successes =
-    (previous?.successes ?? 0) + (result._tag === "Succeeded" ? 1 : 0)
-
-  const fallbackHitRate: Record<string, number> = {
-    ...(previous?.fallbackHitRate ?? {}),
-  }
-
-  for (const event of result.trace) {
-    if (event._tag !== "TargetResolved") continue
-    const previousRate = fallbackHitRate[event.stepId] ?? 0
-    const hit = event.resolution.rank > 0 ? 1 : 0
-    // Running mean across every replay of this step.
-    fallbackHitRate[event.stepId] =
-      (previousRate * (replays - 1) + hit) / replays
-  }
-
   const updated = new CapabilityArtifact({
-    ...artifact,
-    health: new Health({
-      replays,
-      successes,
-      lastVerifiedAt: new Date().toISOString(),
-      fallbackHitRate,
-    }),
+    ...base,
+    health: accumulateHealth({ previous: base.health, result, tenant }),
   })
 
   const encoded = await Effect.runPromise(encodeCapability(updated))
-  await writeFile(path, `${JSON.stringify(encoded, null, 2)}\n`, "utf8")
+  await writeFile(path, `${JSON.stringify(encoded, null, 2)}
+`, "utf8")
+
+  const drifting = tenant ? driftingSteps(updated.health, tenant) : []
+
+  if (drifting.length > 0) {
+    // The actionable form of a drift alarm: not "something has changed" but
+    // "these steps need an entry in this tenant's overlay".
+    console.log("")
+    console.log(
+      `drift       ${drifting.join(", ")} resolve by fallback on at least half of ${tenant}’s runs.`
+    )
+    console.log(`            Add them to capabilities/overlays/…${tenant}.json.`)
+  }
 }

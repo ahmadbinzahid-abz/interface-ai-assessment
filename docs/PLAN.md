@@ -5,29 +5,28 @@ write-up is `/REPORT.md`.
 
 ## Start here (resuming in a fresh session)
 
-Phases 0–6 are done; `/README.md` and `/REPORT.md` are written (they predate
-Phases 5–6 and need a takeover section and a console section). `pnpm test` runs
-144 tests with no database and no API key.
+Phases 0–7 are done; `/README.md` and `/REPORT.md` are written (they predate
+Phases 5–7 and need a takeover section, a console section, and the tenant-overlay
+result). `pnpm test` runs 170 tests with no database and no API key.
 
 To see the whole thing, three terminals:
 
 ```
 pnpm --filter target-corebank dev                  # the legacy app, :4100
-CUA_SECRET_OPERATORID=teller01 CUA_SECRET_OPERATORPASSWORD=demo-pass   pnpm --filter orchestrator dev                   # API + evidence, :4000
+CUA_SECRET_OPERATORID=teller01 CUA_SECRET_OPERATORPASSWORD=demo-pass \
+  pnpm --filter orchestrator dev                   # API + evidence, :4000
 pnpm --filter web dev                              # console, :3000
 ```
 
 Remaining, in the order I would do them:
 
-1. **Tenant overlay end to end (Phase 7).** The merge is implemented and
-   unit-tested; replaying one artifact against both tenant variants is the §3.7
-   gate and is not done. The capability catalog as Gemini function declarations
-   sits alongside it and is nearly free — the API already serves the typed
-   contract the declarations would be generated from.
+1. **Update `/README.md` and `/REPORT.md`** — §3.6 with the live takeover that now
+   exists, §3.5 with the console and evidence viewer, §3.7 with evidence runs 09
+   and 10. This is the last thing actually owed; everything it describes is built.
 2. **Re-record the capability** when quota resets, with a model strong enough to
-   declare a `MemberNotFound` outcome — see the known imperfection below.
-3. **Update `/REPORT.md`** §3.6 with the takeover design that now exists, and
-   add the console to §3.5.
+   declare a `MemberNotFound` outcome — see the known imperfection below. The
+   recompile path is faithful now, so a better recording can be dropped in
+   without re-deriving anything by hand.
 
 Read `AGENTS.md` for conventions before writing code.
 
@@ -255,7 +254,7 @@ adding an outcome to a capability breaks the build until the UI handles it.
 | 4 ✅ | Replay engine: executor, detection ordering, recovery layer, result contract, output extraction | Happy path + all seven fault paths hit the correct branch of the result union |
 | 5 ✅ | Session manager, control lease, intervention API, WS screencast + input forwarding, operator capture, handback | Live run pauses → human drives → hands back → run completes |
 | 6 ✅ | Typed HTTP API; operator console: catalog, run/evidence viewer, intervention inbox, take-control, playground | Console drives a paused run to completion |
-| 7 | Tenant overlay merge, drift telemetry, capability catalog as Gemini function declarations + demo invocation | One artifact replays on both tenant variants |
+| 7 ✅ | Tenant overlay merge, per-tenant drift telemetry, capability catalog as tool declarations | One artifact replays on both tenant variants |
 | 8 ◐ | `/README.md`, `/REPORT.md` (their exact seven headings), `/evidence/` with discovery run + happy replay + **failing replay** | Tests green, `tsc --noEmit` clean |
 
 ## 9. Fault matrix (target app → requirement)
@@ -576,6 +575,99 @@ extension-alias setting and looks for a literal `.js`; webpack's
 step for `@workspace/contracts` — would put a stale-able artifact between the
 contract and the client that decodes with it, which is the one thing this design
 is trying not to have.
+
+## 10g. Phase 7 status
+
+**Phase 7 — complete.** 170 tests. The gate is met twice over: an integration suite
+that replays one artifact against both tenants of the stand-in, and two committed
+evidence directories (`09-`, `10-`) from real CLI runs of the *shipped* capability
+against both installs. Both return `$4,812.65`; the Riverbend run carries
+`summary.tenant: "riverbend"`.
+
+The overlay is nine lines. Riverbend labels the member field `Member #`, captions
+the button `Find Member`, wraps its content in an extra table, runs a different
+product version and lives at a different path — and every step still resolved at
+rank 0, meaning the relational anchors survived the extra nesting without falling
+back to markup. The resolver did the work the overlay did not have to.
+
+### The defect that made the whole idea not work
+
+The shipped artifact recorded its opening step as a **literal URL**
+(`http://localhost:4100/firstcity/login`), and its `urlMatches` checkpoint the
+same way. An overlay setting `entryPoint` therefore changed a field nothing read:
+the run signed into First City and then failed on a Riverbend label. It failed
+for a *plausible-looking wrong reason*, which is exactly how a bug like this
+survives review.
+
+The fix is a compiler change, not an overlay one. A navigate URL that *is* the
+declared entry point is now emitted as `{{entryPoint}}`, and the install's origin
+as `{{baseUrl}}` — so the artifact references its entry point rather than
+repeating it, and `target.entryPoint` becomes load-bearing instead of decorative.
+A test asserts the run ends on `/riverbend/` and never touches `/firstcity/`.
+
+A second, quieter one: the compiler gives every `type` step a `valueEquals`
+checkpoint carrying its **own copy** of the descriptor. An overlay retargeting
+the action alone would fill the field correctly and then fail to confirm it — a
+failure that reads as a broken tenant rather than a half-applied overlay. A
+checkpoint asserting the control the overlay just moved now moves with it, and
+`checkpoints` / `successCondition` overrides exist for assertions that are about
+*words on a screen* rather than about controls.
+
+### `cua recompile` was quietly broken, and it mattered here
+
+Regenerating the artifact through the fixed compiler surfaced this: a recording
+is **evidence**, and evidence is redacted on the way to disk. The compiler
+parameterises by *searching for the value*, and the value had already been masked
+— so recompiling produced an anchor reading `S-0001-[redacted:declared]`. That
+compiles, commits, reviews cleanly, and resolves nothing.
+
+Three changes, in the order they matter:
+
+1. **The redactor labels what it masked** — `[redacted:memberId]` rather than
+   `[redacted:declared]`. The label is the declaring field's name, which the
+   artifact already publishes, so it leaks nothing and makes evidence more
+   readable besides.
+2. **The compiler turns a labelled marker straight back into a reference**, so a
+   recording is recompilable without the compiler ever seeing the value.
+3. **The compiler refuses to emit an artifact containing a redaction marker** —
+   the same defence-in-depth shape as the existing secret scan. A silently broken
+   artifact is worse than a failed compile.
+
+`recompile` now also preserves the original transcript digest and discovery
+timestamp: reading an old recording through a new compiler does not change *when*
+or *by which model* the flow was discovered, and stamping it would lose the only
+thing tying an artifact back to its trace. The one committed recording was
+migrated to labelled masks (three occurrences, each verified to be the member id
+— secrets never reach a recording as values, only as `{$secret}` refs).
+
+### Drift telemetry is per tenant, or it means nothing
+
+`fallbackHitRate` is split by institution, because the aggregate stops being
+actionable the moment one capability serves many installs: three percent across
+forty tenants is either forty slightly degraded or one that has moved, and only
+the second is something a person can act on. `driftingSteps` turns that into a
+concrete proposal — *these steps need an entry in this tenant's overlay* — which
+is a reviewable pull request rather than an alert nobody knows what to do with.
+The running-mean arithmetic is pure and unit-tested.
+
+Health write-back had a latent bug worth naming: it wrote back the artifact it
+*ran*, which under `--tenant` is the resolved one. That would have quietly turned
+the shared base capability into Riverbend's. It writes onto the base now, with
+the tenant as a key.
+
+### The catalog closes the loop
+
+`cua catalog [--json]` and `GET /api/capabilities/declarations` emit tool
+declarations **derived** from the artifacts — name, typed arguments with their
+patterns, and the declared outcomes a caller must not retry. Nothing is written
+alongside the artifact, so what an agent believes it can do cannot drift from
+what the system will execute. `{{memberId}}` renders as `<memberId>`: a
+placeholder is an instruction to the replay engine and noise to a model.
+
+Known rough edge: the artifact's description is still the model's own past-tense
+summary ("Looked up member <memberId>…"). Accurate, slightly odd as a tool
+description. Rewriting a model's prose is a compiler concern and not one worth
+guessing at.
 
 ## 10. Status log
 

@@ -83,9 +83,24 @@ export const defaultRules: readonly RedactionRule[] = [
 const escapeRegExp = (value: string): string =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
+/**
+ * A value to mask, and optionally what it *was*.
+ *
+ * The label is the declaring field's name — `memberId`, `operatorPassword` — not
+ * the value, so naming it leaks nothing the artifact does not already publish.
+ * It earns its place twice: an evidence reader can see which field a masked span
+ * came from instead of a row of identical `[redacted:declared]`, and the
+ * compiler can turn `[redacted:memberId]` back into `{{memberId}}` when a
+ * recording is recompiled — without ever being told the value.
+ */
+export interface DeclaredValue {
+  readonly value: string
+  readonly label?: string
+}
+
 export interface RedactorOptions {
   /** Exact strings to mask wherever they appear. Resolved secrets and declared PII. */
-  readonly values?: readonly string[]
+  readonly values?: readonly (string | DeclaredValue)[]
   readonly rules?: readonly RedactionRule[]
 }
 
@@ -100,17 +115,20 @@ export const makeRedactor = ({
   rules = defaultRules,
 }: RedactorOptions = {}): Redactor => {
   // Longest first, so masking "12345" does not leave fragments of "123456".
-  const declared = [...values]
-    .filter((value) => value.trim().length >= 3)
-    .sort((a, b) => b.length - a.length)
+  const declared = values
+    .map((entry) =>
+      typeof entry === "string" ? { value: entry } : entry
+    )
+    .filter((entry) => entry.value.trim().length >= 3)
+    .sort((a, b) => b.value.length - a.value.length)
 
   const text = (value: string): string => {
     let out = value
 
-    for (const declaredValue of declared) {
+    for (const entry of declared) {
       out = out.replace(
-        new RegExp(escapeRegExp(declaredValue), "g"),
-        "[redacted:declared]"
+        new RegExp(escapeRegExp(entry.value), "g"),
+        `[redacted:${entry.label ?? "declared"}]`
       )
     }
 

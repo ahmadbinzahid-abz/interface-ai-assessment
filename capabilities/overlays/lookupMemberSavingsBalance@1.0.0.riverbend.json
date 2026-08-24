@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "overlay/v1",
+  "tenant": "riverbend",
+  "capabilityId": "cap_lookupmembersavingsbalance",
+  "capabilityVersion": "1.0.0",
+  "productVersion": "8.4.7",
+  "entryPoint": "{{baseUrl}}/riverbend/login",
+  "notes": "Riverbend runs the same CoreBank 8.4.x servicing desk as First City, with its own wording: the member field is labelled \"Member #\" and the search button reads \"Find Member\". Everything else in this flow — the sign-on form, the frameset, the accounts grid and the account-number format — is the vendor's, so it is not repeated here. Nine lines instead of a second recording.",
+  "targets": {
+    "s5": {
+      "description": "textbox labelled \"Member #\"",
+      "frame": ["contentFrame"],
+      "role": "textbox",
+      "anchors": [
+        {
+          "relation": "rightOf",
+          "role": "cell",
+          "match": { "text": "Member #", "exact": true }
+        }
+      ],
+      "fallbacks": [{ "_tag": "controlName", "name": "f1_ctl03" }]
+    },
+    "s6": {
+      "description": "button \"Find Member\"",
+      "frame": ["contentFrame"],
+      "role": "button",
+      "name": { "text": "Find Member", "exact": true },
+      "anchors": [],
+      "fallbacks": [{ "_tag": "controlName", "name": "f1_ctl09" }]
+    }
+  }
+}

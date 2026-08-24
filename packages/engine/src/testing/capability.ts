@@ -133,7 +133,10 @@ export const buildTestCapability = () =>
         intent: "Open the servicing desk sign-on page.",
         action: {
           _tag: "navigate",
-          url: { _tag: "template", text: "{{baseUrl}}/firstcity/login" },
+          // Referenced, not repeated: an overlay changes `target.entryPoint`
+          // and this step follows it. Writing the URL out here again is what
+          // makes a capability silently open the tenant it was recorded against.
+          url: { _tag: "template", text: "{{entryPoint}}" },
         },
         riskClass: "safe",
         checkpoint: textPresent("Sign On"),

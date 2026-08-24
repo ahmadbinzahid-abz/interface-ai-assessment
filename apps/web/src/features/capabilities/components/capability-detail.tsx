@@ -1,9 +1,11 @@
 "use client"
 
+import { useState } from "react"
 import { Either, Match } from "effect"
 
 import type { Step } from "@workspace/contracts"
 import { Badge } from "@workspace/ui/components/badge"
+import { Button } from "@workspace/ui/components/button"
 import {
   Card,
   CardContent,
@@ -37,7 +39,7 @@ import {
 } from "@/components/common/status/query-states"
 import { NotFound } from "@/components/common/status/not-found"
 import { RunCapabilityForm } from "@/features/playground/components/run-capability-form"
-import { useCapability } from "../hooks/use-capabilities"
+import { useCapability, useOverlayTenants } from "../hooks/use-capabilities"
 
 /**
  * The artifact, made readable.
@@ -55,7 +57,17 @@ export function CapabilityDetail({
   readonly name: string
   readonly version: string
 }) {
-  const query = useCapability(name, version)
+  /**
+   * Which institution's version of this capability is on screen.
+   *
+   * Empty means the base artifact — the one recorded against the *product*. The
+   * picker is not a filter: it re-resolves the artifact through that tenant's
+   * overlay, so the steps below are the steps that would actually run there.
+   */
+  const [tenant, setTenant] = useState("")
+
+  const tenants = useOverlayTenants(name, version)
+  const query = useCapability(name, version, tenant || undefined)
 
   if (query.isPending) return <LoadingRows />
   if (query.isError)
@@ -89,10 +101,36 @@ export function CapabilityDetail({
             <h1 className="font-mono text-xl font-semibold">{artifact.name}</h1>
             <Badge variant="outline">v{artifact.version}</Badge>
             <CapabilityStatusBadge status={artifact.status} />
+            {artifact.target.tenant ? (
+              <Badge variant="secondary">
+                resolved for {artifact.target.tenant}
+              </Badge>
+            ) : null}
           </div>
           <p className="text-sm text-muted-foreground">
             {artifact.description}
           </p>
+
+          {tenants.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <span className="text-xs text-muted-foreground">
+                Recorded once against {artifact.target.vendorProduct}. View as:
+              </span>
+              <TenantChoice
+                label="base product"
+                active={tenant === ""}
+                onSelect={() => setTenant("")}
+              />
+              {tenants.map((candidate) => (
+                <TenantChoice
+                  key={candidate}
+                  label={candidate}
+                  active={tenant === candidate}
+                  onSelect={() => setTenant(candidate)}
+                />
+              ))}
+            </div>
+          ) : null}
         </div>
 
         <Tabs defaultValue="contract">
@@ -282,7 +320,10 @@ export function CapabilityDetail({
           </TabsContent>
 
           <TabsContent value="run" className="pt-4">
-            <RunCapabilityForm artifact={artifact} />
+            <RunCapabilityForm
+              artifact={artifact}
+              tenant={tenant || undefined}
+            />
           </TabsContent>
         </Tabs>
       </div>
@@ -357,6 +398,33 @@ const describeCondition = (condition: Step["checkpoint"]): string => {
     case "not":
       return `not ${describeCondition(condition.condition)}`
   }
+}
+
+/**
+ * A tenant choice, as a button rather than a link.
+ *
+ * Switching tenants re-resolves the artifact in place; it does not navigate.
+ * What the reviewer is comparing is two renderings of the same capability, and
+ * making that a URL change would lose the point.
+ */
+function TenantChoice({
+  label,
+  active,
+  onSelect,
+}: {
+  readonly label: string
+  readonly active: boolean
+  readonly onSelect: () => void
+}) {
+  return (
+    <Button
+      variant={active ? "secondary" : "ghost"}
+      size="sm"
+      onClick={onSelect}
+    >
+      {label}
+    </Button>
+  )
 }
 
 function Detail({

@@ -16,4 +16,11 @@ export const REPO_ROOT = resolve(here, "..", "..", "..")
  */
 export const CAPABILITIES_DIR = join(REPO_ROOT, "capabilities")
 
+/**
+ * Tenant overlays live beside the capabilities they specialise, one file per
+ * tenant per capability. Named `<capability>@<version>.<tenant>.json` so the
+ * three things that have to agree are visible in the filename.
+ */
+export const OVERLAYS_DIR = join(CAPABILITIES_DIR, "overlays")
+
 export const EVIDENCE_DIR = join(REPO_ROOT, "evidence")

@@ -1,4 +1,5 @@
 import {
+  CapabilityDeclaration,
   CapabilityNotFound,
   ControlRefused,
   CuaApi,
@@ -8,15 +9,17 @@ import {
   RunNotFound,
 } from "@workspace/contracts"
 import { HttpApiBuilder } from "@effect/platform"
-import { validateInputs } from "@workspace/engine"
+import { declarationsFor, validateInputs } from "@workspace/engine"
 import { Effect, Layer } from "effect"
 
 import type { Orchestrator } from "./orchestrator.js"
 import {
   findRun,
   listCapabilities,
+  listOverlayTenants,
   listRuns,
   readCapability,
+  readCapabilityForTenant,
 } from "./repositories.js"
 
 /**
@@ -32,7 +35,51 @@ export const makeApiLayer = (orchestrator: Orchestrator) => {
   const capabilities = HttpApiBuilder.group(CuaApi, "capabilities", (handlers) =>
     handlers
       .handle("list", () => listCapabilities())
-      .handle("findByName", ({ path }) =>
+      .handle("findByName", ({ path, urlParams }) =>
+        Effect.gen(function* () {
+          // With `?tenant=`, the artifact returned is the *resolved* one — what
+          // would actually execute against that institution, not the base the
+          // reviewer would have to merge in their head.
+          const artifact = yield* readCapabilityForTenant(
+            path.name,
+            path.version,
+            urlParams.tenant
+          )
+
+          if (!artifact) {
+            return yield* new CapabilityNotFound({
+              name: path.name,
+              version: path.version,
+            })
+          }
+
+          return artifact
+        })
+      )
+      .handle("declarations", () =>
+        Effect.gen(function* () {
+          const summaries = yield* listCapabilities()
+
+          const artifacts = yield* Effect.forEach(summaries, (summary) =>
+            readCapability(summary.name, summary.version)
+          )
+
+          return declarationsFor(
+            artifacts.filter(
+              (artifact): artifact is NonNullable<typeof artifact> =>
+                artifact !== undefined
+            )
+          ).map(
+            (declaration) =>
+              new CapabilityDeclaration({
+                name: declaration.name,
+                description: declaration.description,
+                parametersJsonSchema: declaration.parametersJsonSchema,
+              })
+          )
+        })
+      )
+      .handle("tenants", ({ path }) =>
         Effect.gen(function* () {
           const artifact = yield* readCapability(path.name, path.version)
 
@@ -43,7 +90,7 @@ export const makeApiLayer = (orchestrator: Orchestrator) => {
             })
           }
 
-          return artifact
+          return yield* listOverlayTenants(path.name, path.version)
         })
       )
   )
@@ -60,9 +107,10 @@ export const makeApiLayer = (orchestrator: Orchestrator) => {
       )
       .handle("start", ({ payload }) =>
         Effect.gen(function* () {
-          const artifact = yield* readCapability(
+          const artifact = yield* readCapabilityForTenant(
             payload.capability,
-            payload.version
+            payload.version,
+            payload.tenant
           )
 
           if (!artifact) {

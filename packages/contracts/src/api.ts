@@ -79,6 +79,10 @@ export class CapabilitySummary extends Schema.Class<CapabilitySummary>(
   description: Schema.String,
   vendorProduct: Schema.String,
   tenant: Schema.NullOr(Schema.String),
+  /** Institutions this capability has an overlay for. */
+  overlayTenants: Schema.optionalWith(Schema.Array(Schema.String), {
+    default: () => [],
+  }),
   stepCount: Schema.Number,
   inputNames: Schema.Array(Schema.String),
   outputNames: Schema.Array(Schema.String),
@@ -154,6 +158,21 @@ export class SessionView extends Schema.Class<SessionView>("SessionView")({
   takeoverUrl: Schema.NullOr(Schema.String),
 }) {}
 
+/**
+ * A capability as a calling agent sees it: a tool declaration.
+ *
+ * Derived from the artifact rather than written alongside it, so what an agent
+ * believes it can do cannot drift from what the system will execute.
+ */
+export class CapabilityDeclaration extends Schema.Class<CapabilityDeclaration>(
+  "CapabilityDeclaration"
+)({
+  name: Schema.String,
+  description: Schema.String,
+  /** Plain JSON Schema — what Gemini's `parametersJsonSchema` takes verbatim. */
+  parametersJsonSchema: Schema.Unknown,
+}) {}
+
 export class ReplayRequestPayload extends Schema.Class<ReplayRequestPayload>(
   "ReplayRequestPayload"
 )({
@@ -161,6 +180,14 @@ export class ReplayRequestPayload extends Schema.Class<ReplayRequestPayload>(
   version: Schema.String,
   inputs: Schema.Record({ key: Schema.String, value: Schema.String }),
   baseUrl: Schema.String,
+  /**
+   * Which institution's variant to run.
+   *
+   * Resolved through that tenant's overlay before execution. Omitted means the
+   * base capability, which is the right answer for an install that matches the
+   * vendor's default.
+   */
+  tenant: Schema.optional(Schema.String),
   /**
    * Wait for a person when the run gets stuck, instead of ending it.
    *
@@ -213,7 +240,27 @@ export class CapabilitiesApi extends HttpApiGroup.make("capabilities")
   .add(
     HttpApiEndpoint.get("findByName", "/capabilities/:name/:version")
       .setPath(Schema.Struct({ name: Schema.String, version: Schema.String }))
+      .setUrlParams(Schema.Struct({ tenant: Schema.optional(Schema.String) }))
       .addSuccess(CapabilityArtifact)
+      .addError(CapabilityNotFound, { status: 404 })
+  )
+  /**
+   * The agent-facing view of the whole catalog.
+   *
+   * One request gives a customer-facing agent every tool it can call, with typed
+   * arguments and the declared outcomes it must not treat as errors. This is the
+   * endpoint that makes "a capability is a callable function" literal.
+   */
+  .add(
+    HttpApiEndpoint.get("declarations", "/capabilities/declarations").addSuccess(
+      Schema.Array(CapabilityDeclaration)
+    )
+  )
+  /** Which institutions this capability has an overlay for. */
+  .add(
+    HttpApiEndpoint.get("tenants", "/capabilities/:name/:version/tenants")
+      .setPath(Schema.Struct({ name: Schema.String, version: Schema.String }))
+      .addSuccess(Schema.Array(Schema.String))
       .addError(CapabilityNotFound, { status: 404 })
   )
   .annotateContext(

@@ -2,17 +2,20 @@ import { readdir, readFile, stat } from "node:fs/promises"
 import { basename, join } from "node:path"
 
 import {
+  applyOverlay,
   CapabilitySummary,
   decodeCapability,
+  decodeOverlay,
   RunDetail,
   RunSummary,
   type CapabilityArtifact,
   type ReplayResult,
+  type TenantOverlay,
   type TraceEvent,
 } from "@workspace/contracts"
 import { Effect } from "effect"
 
-import { CAPABILITIES_DIR, EVIDENCE_DIR } from "../paths.js"
+import { CAPABILITIES_DIR, EVIDENCE_DIR, OVERLAYS_DIR } from "../paths.js"
 
 /**
  * Where the console's read model comes from.
@@ -76,7 +79,8 @@ export const readCapability = (
  * "is anything rotting?", and a per-step map is not an answer to that question.
  */
 export const summarizeCapability = (
-  artifact: CapabilityArtifact
+  artifact: CapabilityArtifact,
+  overlayTenants: readonly string[] = []
 ): CapabilitySummary =>
   new CapabilitySummary({
     id: artifact.id,
@@ -86,6 +90,7 @@ export const summarizeCapability = (
     description: artifact.description,
     vendorProduct: artifact.target.vendorProduct,
     tenant: artifact.target.tenant ?? null,
+    overlayTenants,
     stepCount: artifact.steps.length,
     inputNames: artifact.inputs.map((input) => input.name),
     outputNames: artifact.outputs.map((output) => output.name),
@@ -116,10 +121,76 @@ export const listCapabilities = (): Effect.Effect<
       if (!parsed) continue
 
       const artifact = yield* readCapability(parsed.name, parsed.version)
-      if (artifact) summaries.push(summarizeCapability(artifact))
+      if (!artifact) continue
+
+      const tenants = yield* listOverlayTenants(parsed.name, parsed.version)
+      summaries.push(summarizeCapability(artifact, tenants))
     }
 
     return summaries.sort((a, b) => a.name.localeCompare(b.name))
+  })
+
+// ── Tenant overlays ──────────────────────────────────────────────────────
+
+/**
+ * Resolve a capability for one tenant.
+ *
+ * One base artifact plus N thin overlays, never N recordings. The merge is
+ * deterministic and the resolved artifact records which tenant it came from, so
+ * a run can always be traced back to exactly what executed.
+ *
+ * A tenant with no overlay is not an error: most institutions running a vendor
+ * product are configured identically enough that the base capability just works,
+ * and demanding an empty file per tenant would be ceremony.
+ */
+export const readOverlay = (
+  name: string,
+  version: string,
+  tenant: string
+): Effect.Effect<TenantOverlay | undefined> =>
+  Effect.gen(function* () {
+    const path = join(OVERLAYS_DIR, `${name}@${version}.${tenant}.json`)
+
+    const raw = yield* Effect.tryPromise(() => readFile(path, "utf8")).pipe(
+      Effect.catchAll(() => Effect.succeed(undefined))
+    )
+    if (raw === undefined) return undefined
+
+    return yield* decodeOverlay(JSON.parse(raw)).pipe(
+      Effect.catchAll(() => Effect.succeed(undefined))
+    )
+  })
+
+/** The base artifact, specialised for a tenant when one is asked for. */
+export const readCapabilityForTenant = (
+  name: string,
+  version: string,
+  tenant?: string
+): Effect.Effect<CapabilityArtifact | undefined> =>
+  Effect.gen(function* () {
+    const base = yield* readCapability(name, version)
+    if (!base || !tenant) return base
+
+    const overlay = yield* readOverlay(name, version, tenant)
+    return overlay ? applyOverlay(base, overlay) : base
+  })
+
+/** Which tenants this capability has an overlay for. */
+export const listOverlayTenants = (
+  name: string,
+  version: string
+): Effect.Effect<readonly string[]> =>
+  Effect.gen(function* () {
+    const files = yield* Effect.tryPromise(() => readdir(OVERLAYS_DIR)).pipe(
+      Effect.catchAll(() => Effect.succeed([] as string[]))
+    )
+
+    const prefix = `${name}@${version}.`
+
+    return files
+      .filter((file) => file.startsWith(prefix) && file.endsWith(".json"))
+      .map((file) => file.slice(prefix.length, -".json".length))
+      .sort()
   })
 
 // ── Runs ─────────────────────────────────────────────────────────────────

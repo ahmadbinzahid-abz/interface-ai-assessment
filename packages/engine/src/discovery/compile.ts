@@ -37,11 +37,29 @@ export interface CompileRequest {
   readonly vendorProduct: string
   readonly productVersion?: string
   readonly surfaceKind: SurfaceKind
+  /** Where the flow starts, already written against `{{baseUrl}}`. */
   readonly entryPoint: string
+  /**
+   * The origin the recording actually ran against, e.g. `http://localhost:4100`.
+   *
+   * Needed because the run's steps hold *concrete* URLs while the artifact must
+   * hold references. Which institution's install a recording happened to be made
+   * against is a deployment detail, and baking it into the capability makes the
+   * capability un-reusable in exactly the way tenant overlays exist to prevent.
+   */
+  readonly installOrigin?: string
   readonly parameters: readonly DiscoveryParameter[]
   readonly allowlistRef: string
   /** Digest of the run trace. The transcript itself is never persisted. */
   readonly transcriptDigest: string
+  /**
+   * When the discovery run happened.
+   *
+   * Defaults to now, which is right the first time and wrong every time after:
+   * recompiling reads an older recording through a newer compiler, and the flow
+   * was still discovered when it was discovered.
+   */
+  readonly discoveredAt?: string
 }
 
 /**
@@ -78,6 +96,21 @@ const parameterizeText = (
 ): string => {
   let out = text
 
+  /**
+   * A recording is evidence, and evidence is redacted on the way to disk — so a
+   * value this function would otherwise search for may already have been masked.
+   * The mask carries the *field name*, which is all that is needed: the marker
+   * becomes the reference directly, without the compiler ever seeing the value.
+   *
+   * This is what makes `cua recompile` faithful. Without it, recompiling a
+   * shipped capability from its own saved run produced an anchor reading
+   * `S-0001-[redacted:declared]` — a capability that compiles cleanly and
+   * resolves nothing.
+   */
+  for (const parameter of parameters) {
+    out = out.split(`[redacted:${parameter.name}]`).join(`{{${parameter.name}}}`)
+  }
+
   // Longest first, so a short value cannot chew a hole in a longer one.
   const ordered = [...parameters].sort(
     (a, b) => b.value.length - a.value.length
@@ -92,6 +125,39 @@ const parameterizeText = (
   }
 
   return out
+}
+
+/**
+ * Turn a recorded URL back into a reference.
+ *
+ * Two substitutions, in order, and the second is the one that makes tenant
+ * overlays work:
+ *
+ *  1. The install's origin becomes `{{baseUrl}}`, so the capability is not tied
+ *     to the host it was recorded against.
+ *  2. A URL that *is* the entry point becomes `{{entryPoint}}`, so the step that
+ *     opens the application follows whatever the artifact declares its entry
+ *     point to be — which is precisely the field a tenant overlay overrides.
+ *
+ * Without the second, an overlay pointing at `riverbend` would change a field
+ * nothing reads, and the run would obediently open `firstcity` anyway. That is a
+ * silent wrong answer, which is the worst kind.
+ */
+const dereferenceUrl = (
+  text: string,
+  entryPoint: string,
+  installOrigin: string | undefined
+): string => {
+  const withBase = installOrigin
+    ? text.split(installOrigin).join("{{baseUrl}}")
+    : text
+
+  // Trailing slashes are not a difference worth failing over.
+  const normalise = (value: string) => value.replace(/\/+$/, "")
+
+  return normalise(withBase) === normalise(entryPoint)
+    ? "{{entryPoint}}"
+    : withBase
 }
 
 /**
@@ -132,10 +198,11 @@ const parameterizeDescriptor = (
     })),
   })
 
-/** Apply the same treatment to whatever descriptor an action carries. */
+/** Apply the same treatment to whatever descriptor or URL an action carries. */
 const parameterizeAction = (
   action: DiscoveryRun["steps"][number]["action"],
-  parameters: readonly DiscoveryParameter[]
+  parameters: readonly DiscoveryParameter[],
+  urls: UrlContext
 ): DiscoveryRun["steps"][number]["action"] => {
   switch (action._tag) {
     case "click":
@@ -146,15 +213,43 @@ const parameterizeAction = (
         ...action,
         target: parameterizeDescriptor(action.target, parameters),
       }
+
+    case "navigate": {
+      // A navigate's URL is the one place a recording writes down which install
+      // and which tenant it was made against.
+      const raw =
+        action.url._tag === "literal"
+          ? action.url.value
+          : action.url._tag === "template"
+            ? action.url.text
+            : undefined
+
+      if (raw === undefined) return action
+
+      const text = dereferenceUrl(
+        parameterizeText(raw, parameters),
+        urls.entryPoint,
+        urls.installOrigin
+      )
+
+      return { ...action, url: { _tag: "template", text } }
+    }
+
     default:
       return action
   }
 }
 
+interface UrlContext {
+  readonly entryPoint: string
+  readonly installOrigin: string | undefined
+}
+
 /** Apply `parameterizeText` wherever a condition carries free text. */
 const parameterizeCondition = (
   condition: Condition,
-  parameters: readonly DiscoveryParameter[]
+  parameters: readonly DiscoveryParameter[],
+  urls: UrlContext
 ): Condition => {
   switch (condition._tag) {
     case "textPresent":
@@ -164,9 +259,16 @@ const parameterizeCondition = (
         text: parameterizeText(condition.text, parameters),
       }
     case "urlMatches":
+      // The same argument as for a navigate URL: a checkpoint asserting the
+      // firstcity login URL fails on every other tenant, and a capability
+      // recorded against a product should assert against the product.
       return {
         ...condition,
-        pattern: parameterizeText(condition.pattern, parameters),
+        pattern: dereferenceUrl(
+          parameterizeText(condition.pattern, parameters),
+          urls.entryPoint,
+          urls.installOrigin
+        ),
       }
     default:
       return condition
@@ -258,7 +360,8 @@ const buildSuccessCondition = (
  */
 const checkpointFor = (
   step: DiscoveryRun["steps"][number],
-  parameters: readonly DiscoveryParameter[]
+  parameters: readonly DiscoveryParameter[],
+  urls: UrlContext
 ): Condition | undefined => {
   if (step.action._tag === "type") {
     return {
@@ -269,7 +372,7 @@ const checkpointFor = (
   }
 
   return step.checkpoint
-    ? parameterizeCondition(step.checkpoint, parameters)
+    ? parameterizeCondition(step.checkpoint, parameters, urls)
     : undefined
 }
 
@@ -282,9 +385,11 @@ export const compileCapability = ({
   productVersion,
   surfaceKind,
   entryPoint,
+  installOrigin,
   parameters,
   allowlistRef,
   transcriptDigest,
+  discoveredAt,
 }: CompileRequest): CapabilityArtifact => {
   if (run.result._tag !== "Completed") {
     throw new Error(
@@ -305,7 +410,7 @@ export const compileCapability = ({
         new InputParam({
           name: parameter.name,
           type: "string",
-          description: parameter.description,
+          description: parameterizeText(parameter.description, parameters),
           required: true,
           pattern: inferPattern(parameter.value),
           sensitivity: parameter.sensitivity ?? "identifier",
@@ -321,7 +426,9 @@ export const compileCapability = ({
             ? "number"
             : "string",
         format: output.format,
-        description: output.description,
+        // The model writes "the balance for member 12345"; the capability is for
+        // any member. Prose is a value channel like any other.
+        description: parameterizeText(output.description, parameters),
         // A balance read out of a banking screen is regulated data by default.
         // Under-classifying here is what leaks it into a log later.
         sensitivity: output.format === "currency-usd" ? "financial" : "pii",
@@ -332,7 +439,7 @@ export const compileCapability = ({
     (outcome) =>
       new DeclaredOutcome({
         tag: outcome.tag,
-        description: outcome.description,
+        description: parameterizeText(outcome.description, parameters),
         detect: textPresent(parameterizeText(outcome.whenText, parameters)),
         partialOutputs: [],
       })
@@ -349,6 +456,8 @@ export const compileCapability = ({
    * the following step's checkpoint is for — replay reports it honestly instead
    * of proceeding blindly.
    */
+  const urls: UrlContext = { entryPoint, installOrigin }
+
   const steps = run.steps
     .filter((step) => !step.exploratory)
     .map(
@@ -356,9 +465,9 @@ export const compileCapability = ({
         new Step({
           id: step.id,
           intent: step.intent,
-          action: parameterizeAction(step.action, parameters),
+          action: parameterizeAction(step.action, parameters, urls),
           riskClass: step.riskClass,
-          checkpoint: checkpointFor(step, parameters),
+          checkpoint: checkpointFor(step, parameters, urls),
           timeoutMs: 10_000,
           observedMs: step.observedMs,
         })
@@ -378,7 +487,7 @@ export const compileCapability = ({
     name,
     version,
     status: "draft",
-    description: run.result.summary,
+    description: parameterizeText(run.result.summary, parameters),
 
     target: new TargetBinding({
       surfaceKind,
@@ -405,7 +514,7 @@ export const compileCapability = ({
 
     provenance: new Provenance({
       discoveredBy: run.modelId,
-      discoveredAt: new Date().toISOString(),
+      discoveredAt: discoveredAt ?? new Date().toISOString(),
       runId: run.runId,
       transcriptDigest,
     }),
@@ -414,8 +523,40 @@ export const compileCapability = ({
   })
 
   assertNoSecretsLeaked(artifact, parameters)
+  assertNothingRedacted(artifact)
 
   return artifact
+}
+
+/**
+ * Refuse to emit an artifact that carries a redaction marker.
+ *
+ * This one was found by trying to recompile a shipped capability from its own
+ * saved recording. Recordings are *evidence*, and evidence is redacted on the
+ * way to disk — so by the time a recording is read back, the member number the
+ * compiler parameterises by searching for has already been replaced with
+ * `[redacted:…]`. The compiler happily produced an anchor reading
+ * `S-0001-[redacted:declared]`, which is not a credential leak and not a crash:
+ * it is a capability that compiles, commits, reviews cleanly, and resolves
+ * nothing at replay.
+ *
+ * A silently broken artifact is worse than a failed compile, so this fails.
+ */
+const REDACTION_MARKER = /\[redacted:[^\]]+\]/
+
+const assertNothingRedacted = (artifact: CapabilityArtifact): void => {
+  const serialised = JSON.stringify(artifact)
+  const found = REDACTION_MARKER.exec(serialised)
+
+  if (found) {
+    throw new Error(
+      `Refusing to emit a capability containing ${found[0]}. ` +
+        "The recording it was compiled from is redacted evidence, so values " +
+        "that should have become parameters were masked before the compiler " +
+        "saw them. Recompile from a recording whose declared values were " +
+        "recorded as references."
+    )
+  }
 }
 
 /**

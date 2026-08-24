@@ -154,6 +154,7 @@ describe("the capability catalog", () => {
     const result = await run(
       client.capabilities.findByName({
         path: { name: FIXTURE_NAME, version: FIXTURE_VERSION },
+        urlParams: {},
       })
     )
 
@@ -170,6 +171,7 @@ describe("the capability catalog", () => {
     const result = await run(
       client.capabilities.findByName({
         path: { name: "nothingLikeThis", version: "1.0.0" },
+        urlParams: {},
       })
     )
 
@@ -182,6 +184,57 @@ describe("the capability catalog", () => {
     expect(result.left._tag).toBe("CapabilityNotFound")
     if (result.left._tag !== "CapabilityNotFound") return
     expect(result.left.name).toBe("nothingLikeThis")
+  })
+})
+
+describe("the agent-facing catalog", () => {
+  it("derives a tool declaration per capability", async () => {
+    const result = await run(client.capabilities.declarations())
+
+    expect(result._tag).toBe("Right")
+    if (result._tag !== "Right") return
+
+    const found = result.right.find(
+      (declaration) => declaration.name === FIXTURE_NAME
+    )
+
+    expect(found).toBeDefined()
+    // Typed arguments, and the outcomes a caller must not retry. This one
+    // request is everything an agent needs to call the system correctly.
+    expect(found?.description).toContain("MemberNotFound")
+
+    const schema = found?.parametersJsonSchema as {
+      properties: Record<string, { pattern?: string }>
+      additionalProperties: boolean
+    }
+    expect(schema.properties["memberId"]?.pattern).toBe("^\\d+$")
+    expect(schema.additionalProperties).toBe(false)
+  })
+
+  it("lists the institutions a capability has an overlay for", async () => {
+    const result = await run(
+      client.capabilities.tenants({
+        path: { name: FIXTURE_NAME, version: FIXTURE_VERSION },
+      })
+    )
+
+    expect(result._tag).toBe("Right")
+    if (result._tag !== "Right") return
+    // The fixture ships no overlay; the shipped capability does, and that is
+    // covered where the overlay itself lives.
+    expect(result.right).toEqual([])
+  })
+
+  it("answers tenants for a capability that does not exist as not found", async () => {
+    const result = await run(
+      client.capabilities.tenants({
+        path: { name: "nothingLikeThis", version: "1.0.0" },
+      })
+    )
+
+    expect(result._tag).toBe("Left")
+    if (result._tag !== "Left") return
+    expect(result.left._tag).toBe("CapabilityNotFound")
   })
 })
 

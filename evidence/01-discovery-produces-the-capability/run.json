@@ -2,7 +2,7 @@
   "runId": "discovery-2026-08-21T14-27-08-526Z",
   "result": {
     "_tag": "Completed",
-    "summary": "Looked up member [redacted:declared] and extracted their savings balance.",
+    "summary": "Looked up member [redacted:memberId] and extracted their savings balance.",
     "successText": "$4,812.65"
   },
   "steps": [
@@ -265,7 +265,7 @@
               "relation": "rightOf",
               "role": "cell",
               "match": {
-                "text": "S-0001-[redacted:declared]",
+                "text": "S-0001-[redacted:memberId]",
                 "exact": true
               }
             }
@@ -295,7 +295,7 @@
     {
       "name": "savingsBalance",
       "format": "currency-usd",
-      "description": "The current savings balance for member [redacted:declared].",
+      "description": "The current savings balance for member [redacted:memberId].",
       "sampleValue": "$4,812.65"
     }
   ],

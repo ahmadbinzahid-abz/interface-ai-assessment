@@ -187,7 +187,15 @@ const executeReplay = (
       return failed({ _tag: "InputValidationFailed", issues })
     }
 
-    const bindings: Bindings = { baseUrl, inputs, outputs, vault }
+    const bindings: Bindings = {
+      baseUrl,
+      // Taken from the artifact being executed, which for a tenant-resolved
+      // capability is the overlay's entry point rather than the base one.
+      entryPoint: artifact.target.entryPoint,
+      inputs,
+      outputs,
+      vault,
+    }
 
     // A session owns its lease; a bare replay takes one. Either way the actor
     // that reaches the surface is this run and nothing else.

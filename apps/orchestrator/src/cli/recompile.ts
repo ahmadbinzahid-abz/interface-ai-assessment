@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
-import { join } from "node:path"
+import { createHash } from "node:crypto"
+import { dirname, isAbsolute, join, resolve } from "node:path"
 
 import { encodeCapability } from "@workspace/contracts"
 import {
@@ -10,7 +11,7 @@ import {
 import { coreBankReadonly } from "@workspace/policy"
 import { Effect } from "effect"
 
-import { CAPABILITIES_DIR } from "../paths.js"
+import { CAPABILITIES_DIR, REPO_ROOT } from "../paths.js"
 
 /**
  * `cua recompile` — re-emit an artifact from a saved run.
@@ -39,9 +40,50 @@ export interface RecompileOptions {
   readonly parameters: readonly DiscoveryParameter[]
 }
 
+/**
+ * The digest of the run's own trace, computed the same way `discover` does it —
+ * so a recompiled artifact carries the identical provenance digest.
+ */
+const digestOfTrace = async (runFile: string): Promise<string> => {
+  const trace = await readFile(
+    join(dirname(runFile), "trace.jsonl"),
+    "utf8"
+  ).catch(() => "")
+
+  return `sha256:${createHash("sha256").update(trace).digest("hex")}`
+}
+
+/** When the recording was made, taken from its own first trace line. */
+const discoveredAtOf = async (runFile: string): Promise<string | undefined> => {
+  const trace = await readFile(
+    join(dirname(runFile), "trace.jsonl"),
+    "utf8"
+  ).catch(() => "")
+
+  const first = trace.split("\n").find((line) => line.trim().length > 0)
+  if (!first) return undefined
+
+  try {
+    const at = (JSON.parse(first) as { at?: unknown }).at
+    return typeof at === "string" ? at : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export const recompile = async (options: RecompileOptions): Promise<number> => {
-  const raw = await readFile(options.runFile, "utf8").catch(() => {
-    throw new Error(`No saved run at ${options.runFile}.`)
+  /**
+   * `--run evidence/…` means what a person typing it at the repository root
+   * means, not what it means relative to this package's directory. Resolving
+   * against the repo root is the difference between a working command and a
+   * "no saved run" that looks like the evidence is missing.
+   */
+  const runFile = isAbsolute(options.runFile)
+    ? options.runFile
+    : resolve(REPO_ROOT, options.runFile)
+
+  const raw = await readFile(runFile, "utf8").catch(() => {
+    throw new Error(`No saved run at ${runFile}.`)
   })
 
   // Decoded, not cast: the recording contains target descriptors, which are
@@ -66,11 +108,19 @@ export const recompile = async (options: RecompileOptions): Promise<number> => {
     vendorProduct: options.vendorProduct,
     surfaceKind: "legacy-web",
     entryPoint: options.entryPoint.replace(origin, "{{baseUrl}}"),
+    installOrigin: origin,
     parameters: options.parameters,
     allowlistRef: coreBankReadonly.id,
-    transcriptDigest: run.runId
-      ? `sha256:recompiled-from-${run.runId}`
-      : "sha256:recompiled",
+    /**
+     * The *original* transcript digest, not a note saying this was recompiled.
+     *
+     * Provenance answers "which model run produced this flow", and recompiling
+     * does not change the answer — the same recording is being read through a
+     * newer compiler. Stamping `recompiled-from-…` here would lose the one thing
+     * that lets an artifact be tied back to the trace it came from.
+     */
+    transcriptDigest: await digestOfTrace(runFile),
+    discoveredAt: await discoveredAtOf(runFile),
   })
 
   const encoded = await Effect.runPromise(encodeCapability(artifact))

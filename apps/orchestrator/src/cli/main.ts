@@ -5,6 +5,7 @@ import type { DiscoveryParameter } from "@workspace/engine"
 import { config as loadEnv } from "dotenv"
 
 import { REPO_ROOT } from "../paths.js"
+import { catalog } from "./catalog.js"
 import { discover } from "./discover.js"
 import { recompile } from "./recompile.js"
 import { replay } from "./replay.js"
@@ -53,11 +54,21 @@ const USAGE = `cua — computer-use automation
                   an operator console connects to.
     --wait        Milliseconds to wait for an operator before giving up.
                   Only meaningful with --live. Default: wait indefinitely.
+    --tenant      Run this institution's variant, resolved through
+                  capabilities/overlays/<capability>.<tenant>.json. One
+                  recording serves every tenant of the same vendor product.
 
     No model, no API key. Secrets come from CUA_SECRET_<NAME> in the
     environment or .env — never from the artifact.
 
     Exit codes: 0 succeeded, 1 failed, 2 escalated, 3 business outcome.
+
+  cua catalog [--json]
+
+    Print the capability catalog as an agent sees it: tool declarations with
+    typed arguments and the declared outcomes a caller must not retry. Derived
+    from the artifacts, never written alongside them. --json emits the exact
+    shape a model tool-call API takes.
 
   cua recompile --run <evidence/…/run.json> --name <capabilityName> [options]
 
@@ -98,6 +109,16 @@ const main = async (): Promise<number> => {
   if (!command || command === "help" || command === "--help") {
     console.log(USAGE)
     return command ? 0 : 1
+  }
+
+  if (command === "catalog") {
+    const { values } = parseArgs({
+      args: rest,
+      options: { json: { type: "boolean", default: false } },
+      strict: true,
+    })
+
+    return catalog({ json: values.json as boolean })
   }
 
   if (command === "recompile") {
@@ -150,6 +171,7 @@ const main = async (): Promise<number> => {
         "update-health": { type: "boolean", default: false },
         live: { type: "boolean", default: false },
         wait: { type: "string" },
+        tenant: { type: "string" },
       },
       strict: true,
     })
@@ -175,6 +197,7 @@ const main = async (): Promise<number> => {
       updateHealth: values["update-health"] as boolean,
       live: values.live as boolean,
       waitMs: values.wait ? Number(values.wait) : undefined,
+      tenant: values.tenant,
     })
   }
 

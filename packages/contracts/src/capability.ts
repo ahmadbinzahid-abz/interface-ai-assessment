@@ -192,6 +192,17 @@ export class Provenance extends Schema.Class<Provenance>("Provenance")({
  * tenant's UI has moved — which is how you find drift before it becomes an
  * outage, and how you know which steps need a tenant overlay.
  */
+export class TenantHealth extends Schema.Class<TenantHealth>("TenantHealth")({
+  replays: Schema.optionalWith(Schema.Number, { default: () => 0 }),
+  successes: Schema.optionalWith(Schema.Number, { default: () => 0 }),
+  lastVerifiedAt: Schema.optional(Schema.String),
+  /** Per step id: the share of replays that needed a lower-ranked strategy. */
+  fallbackHitRate: Schema.optionalWith(
+    Schema.Record({ key: Schema.String, value: Schema.Number }),
+    { default: () => ({}) }
+  ),
+}) {}
+
 export class Health extends Schema.Class<Health>("Health")({
   replays: Schema.optionalWith(Schema.Number, { default: () => 0 }),
   successes: Schema.optionalWith(Schema.Number, { default: () => 0 }),
@@ -201,6 +212,21 @@ export class Health extends Schema.Class<Health>("Health")({
     {
       default: () => ({}),
     }
+  ),
+  /**
+   * The same telemetry, split by institution.
+   *
+   * Aggregate drift is close to meaningless once one capability serves many
+   * tenants: a step resolving by fallback 3% of the time across forty installs
+   * could be forty installs slightly degraded, or one install that has moved and
+   * needs an overlay entry. Only the second is actionable, and only the split
+   * tells them apart.
+   *
+   * `__base` holds runs made with no overlay applied.
+   */
+  byTenant: Schema.optionalWith(
+    Schema.Record({ key: Schema.String, value: TenantHealth }),
+    { default: () => ({}) }
   ),
 }) {}
 

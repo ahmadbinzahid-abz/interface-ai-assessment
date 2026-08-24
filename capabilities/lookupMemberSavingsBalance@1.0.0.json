@@ -4,7 +4,7 @@
   "name": "lookupMemberSavingsBalance",
   "version": "1.0.0",
   "status": "draft",
-  "description": "Looked up member 12345 and extracted their savings balance.",
+  "description": "Looked up member {{memberId}} and extracted their savings balance.",
   "target": {
     "surfaceKind": "legacy-web",
     "vendorProduct": "corebank",
@@ -26,7 +26,7 @@
       "name": "savingsBalance",
       "type": "string",
       "format": "currency-usd",
-      "description": "The current savings balance for member 12345.",
+      "description": "The current savings balance for member {{memberId}}.",
       "sensitivity": "financial"
     }
   ],
@@ -38,14 +38,14 @@
       "action": {
         "_tag": "navigate",
         "url": {
-          "_tag": "literal",
-          "value": "http://localhost:4100/firstcity/login"
+          "_tag": "template",
+          "text": "{{entryPoint}}"
         }
       },
       "riskClass": "safe",
       "checkpoint": {
         "_tag": "urlMatches",
-        "pattern": "http://localhost:4100/firstcity/login"
+        "pattern": "{{entryPoint}}"
       },
       "timeoutMs": 10000,
       "observedMs": 0
@@ -458,13 +458,49 @@
   },
   "provenance": {
     "discoveredBy": "gemini-3.1-flash-lite",
-    "discoveredAt": "2026-08-21T14:27:44.083Z",
+    "discoveredAt": "2026-08-21T14:27:08.527Z",
     "runId": "discovery-2026-08-21T14-27-08-526Z",
     "transcriptDigest": "sha256:77d9014ce0aae886a0cfce6509db1e65d9380d338d9b1281ab4267fc587105a6"
   },
   "health": {
-    "replays": 0,
-    "successes": 0,
-    "fallbackHitRate": {}
+    "replays": 2,
+    "successes": 2,
+    "lastVerifiedAt": "2026-08-24T13:54:26.905Z",
+    "fallbackHitRate": {
+      "s2": 0,
+      "s3": 0,
+      "s4": 0,
+      "s5": 0,
+      "s6": 0,
+      "s7": 0
+    },
+    "byTenant": {
+      "riverbend": {
+        "replays": 1,
+        "successes": 1,
+        "lastVerifiedAt": "2026-08-24T13:54:10.951Z",
+        "fallbackHitRate": {
+          "s2": 0,
+          "s3": 0,
+          "s4": 0,
+          "s5": 0,
+          "s6": 0,
+          "s7": 0
+        }
+      },
+      "__base": {
+        "replays": 1,
+        "successes": 1,
+        "lastVerifiedAt": "2026-08-24T13:54:26.905Z",
+        "fallbackHitRate": {
+          "s2": 0,
+          "s3": 0,
+          "s4": 0,
+          "s5": 0,
+          "s6": 0,
+          "s7": 0
+        }
+      }
+    }
   }
 }

@@ -35,6 +35,17 @@ export const envVault = (prefix = "CUA_SECRET_"): Vault => ({
 
 export interface Bindings {
   readonly baseUrl: string
+  /**
+   * Where this capability's flow starts, as the artifact declares it.
+   *
+   * Available as `{{entryPoint}}` so a recorded `navigate` step can *reference*
+   * the entry point instead of repeating it. That indirection is what makes a
+   * tenant overlay work: an overlay changes `target.entryPoint`, and the step
+   * that opens the application follows it. With the URL written out literally,
+   * the overlay would change a field nothing reads and the run would still open
+   * the tenant it was recorded against.
+   */
+  readonly entryPoint?: string
   readonly inputs: Record<string, string>
   readonly outputs: ReplayOutputs
   readonly vault: Vault
@@ -61,6 +72,13 @@ export class ValueResolutionError extends Error {
 export const substitute = (text: string, bindings: Bindings): string =>
   text.replace(/\{\{(\w+)\}\}/g, (whole, name: string) => {
     if (name === "baseUrl") return bindings.baseUrl
+
+    if (name === "entryPoint" && bindings.entryPoint !== undefined) {
+      // The entry point is itself written against `{{baseUrl}}`, so it needs one
+      // more pass. Only one: resolving it recursively would let an entry point
+      // that referenced itself hang the run.
+      return bindings.entryPoint.replace(/\{\{baseUrl\}\}/g, bindings.baseUrl)
+    }
 
     const input = bindings.inputs[name]
     if (input !== undefined) return input

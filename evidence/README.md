@@ -99,6 +99,27 @@ the HTTP status in the detail and a screenshot captured at the point of failure.
 Distinct from both a business outcome and a validation error, which is the split
 the result contract exists to make.
 
+### 09 and 10 — one artifact, two institutions
+
+The §3.7 pair, and the point of the whole overlay mechanism. Both runs execute
+**the same committed capability** with the same input:
+
+```
+cua replay --capability lookupMemberSavingsBalance@1.0.0 --input memberId=12345 --tenant riverbend
+cua replay --capability lookupMemberSavingsBalance@1.0.0 --input memberId=12345
+```
+
+Riverbend labels the member field `Member #` rather than `Member Number`,
+captions the search button `Find Member` rather than `Search`, wraps its content
+in an extra table, runs a different product version and lives at a different
+path. `capabilities/overlays/lookupMemberSavingsBalance@1.0.0.riverbend.json`
+names two controls and an entry point — nine lines — and nothing is re-recorded.
+
+Both return `$4,812.65`, and `summary.tenant` records which install produced the
+answer. Every step resolved at rank 0 on both, meaning the relational anchors
+survived the extra table nesting without falling back to markup: the resolver
+did the work the overlay did not have to.
+
 ## A note on model choice
 
 The runs use different Gemini models because the free tier caps requests per

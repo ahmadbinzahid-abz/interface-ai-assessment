@@ -40,8 +40,11 @@ import { queryKeys, useApiMutation } from "@/lib/query"
  */
 export function RunCapabilityForm({
   artifact,
+  tenant,
 }: {
   readonly artifact: CapabilityArtifact
+  /** Which institution to run against; the base capability when absent. */
+  readonly tenant?: string
 }) {
   const router = useRouter()
 
@@ -68,6 +71,7 @@ export function RunCapabilityForm({
       inputs: values,
       baseUrl,
       live,
+      tenant,
     })
   }
 
@@ -79,6 +83,9 @@ export function RunCapabilityForm({
           <CardDescription>
             Deterministic replay — no model is consulted. The same inputs take
             the same steps in the same order, every time.
+            {tenant
+              ? ` Running ${tenant}'s variant, resolved through its overlay.`
+              : ""}
           </CardDescription>
         </CardHeader>
 

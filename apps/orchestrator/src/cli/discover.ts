@@ -44,14 +44,23 @@ export const discover = async (options: DiscoverOptions): Promise<number> => {
     allowedOrigins: [...new Set([...coreBankReadonly.allowedOrigins, origin])],
   } as typeof coreBankReadonly
 
-  // Every declared parameter value is masked in evidence, along with the
-  // credentials used to sign on.
+  /**
+   * Every declared parameter value is masked in evidence, along with the
+   * credentials used to sign on — and each mask is labelled with the field it
+   * came from.
+   *
+   * The label is what makes the recording recompilable later. A run whose member
+   * number was masked to a bare `[redacted:declared]` cannot be turned back into
+   * a capability, because the compiler parameterises by searching for the value
+   * it can no longer see.
+   */
   const redactor = makeRedactor({
-    values: [
-      ...options.parameters
-        .filter((parameter) => parameter.sensitivity !== "none")
-        .map((parameter) => parameter.value),
-    ],
+    values: options.parameters
+      .filter((parameter) => parameter.sensitivity !== "none")
+      .map((parameter) => ({
+        value: parameter.value,
+        label: parameter.name,
+      })),
   })
 
   const model = makeGeminiClient()
@@ -124,6 +133,7 @@ export const discover = async (options: DiscoverOptions): Promise<number> => {
       vendorProduct: options.vendorProduct,
       surfaceKind: "legacy-web",
       entryPoint: options.entryPoint.replace(origin, "{{baseUrl}}"),
+      installOrigin: origin,
       parameters: options.parameters,
       allowlistRef: coreBankReadonly.id,
       transcriptDigest,
