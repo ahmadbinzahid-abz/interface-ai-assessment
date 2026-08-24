@@ -8,13 +8,20 @@ import {
   Health,
   type ReplayResult,
 } from "@workspace/contracts"
-import { envVault, makeEvidenceWriter, runReplay } from "@workspace/engine"
+import {
+  envVault,
+  makeEvidenceWriter,
+  runReplay,
+  type Escalator,
+  type Session,
+} from "@workspace/engine"
 import { coreBankReadonly, makeRedactor } from "@workspace/policy"
-import { ControlLease, makeWebSurface } from "@workspace/surface"
+import { ControlLease, makeWebSurface, type Surface } from "@workspace/surface"
 import { Effect } from "effect"
 import { chromium } from "playwright"
 
 import { CAPABILITIES_DIR, EVIDENCE_DIR } from "../paths.js"
+import { startLiveSession } from "../server/live-session.js"
 
 /**
  * `cua replay` — the production execution path.
@@ -31,6 +38,16 @@ export interface ReplayOptions {
   readonly headed: boolean
   /** Write replay telemetry back into the artifact. Off by default. */
   readonly updateHealth: boolean
+  /**
+   * Open a takeover gateway and *wait for a person* when the run gets stuck,
+   * instead of ending the run with `Escalated`.
+   *
+   * Off by default on purpose: a scheduled replay has nobody to ask, and a batch
+   * job that silently blocks forever waiting for an operator is worse than one
+   * that reports it needed one.
+   */
+  readonly live: boolean
+  readonly waitMs?: number
 }
 
 /** Exit codes distinguish the branches of the result union for a shell caller. */
@@ -122,17 +139,57 @@ export const replay = async (options: ReplayOptions): Promise<number> => {
     ],
   })
 
-  const browser = await chromium.launch({ headless: !options.headed })
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
-  const lease = new ControlLease()
-  const surface = await Effect.runPromise(makeWebSurface({ page, lease }))
-
   const runId = `replay-${new Date().toISOString().replace(/[:.]/g, "-")}`
   const evidence = await makeEvidenceWriter({
     root: EVIDENCE_DIR,
     runId,
     redactor,
   })
+
+  /**
+   * Two ways to hold a browser, and the difference is who can be asked.
+   *
+   * A plain replay owns a page and a lease and nothing else. A live one owns a
+   * session, an intervention queue and a takeover socket — the same browser,
+   * with somewhere for the run to escalate *to*.
+   */
+  const live = options.live
+    ? await startLiveSession({
+        allowlist,
+        redactor,
+        headed: options.headed,
+        awaitTimeoutMs: options.waitMs,
+        onEvent: (event) => void evidence.event(event),
+        onRaised: (intervention) => {
+          console.log("")
+          console.log(`⏸  paused — ${intervention.reason}`)
+          console.log(`   step        ${intervention.stepId} · ${intervention.stepIntent}`)
+          console.log(`   intervention ${intervention.id}`)
+          console.log(`   screenshot  ${intervention.screenshotRef ?? "(none)"}`)
+          console.log(`   take control at ${liveTakeoverUrl}`)
+          console.log("")
+        },
+      })
+    : undefined
+
+  const liveTakeoverUrl = live?.takeoverUrl ?? ""
+
+  const bare = live
+    ? undefined
+    : await (async () => {
+        const browser = await chromium.launch({ headless: !options.headed })
+        const page = await browser.newPage({
+          viewport: { width: 1280, height: 900 },
+        })
+        const lease = new ControlLease()
+        const surface = await Effect.runPromise(makeWebSurface({ page, lease }))
+        return { browser, lease, surface }
+      })()
+
+  const surface: Surface = live?.surface ?? bare!.surface
+  const lease: ControlLease = live?.lease ?? bare!.lease
+  const escalator: Escalator | undefined = live?.registry
+  const session: Session | undefined = live?.session
 
   console.log(
     `capability  ${artifact.name}@${artifact.version} (${artifact.status})`
@@ -141,12 +198,13 @@ export const replay = async (options: ReplayOptions): Promise<number> => {
     `inputs      ${Object.keys(options.inputs).join(", ") || "(none)"}`
   )
   console.log(`evidence    ${evidence.runDir}`)
+  if (live) console.log(`takeover    ${live.takeoverUrl}`)
   console.log("")
 
   try {
     const result = await Effect.runPromise(
       runReplay(
-        { surface, evidence, allowlist, lease, vault },
+        { surface, evidence, allowlist, lease, vault, escalator, session },
         { artifact, inputs: options.inputs, baseUrl: options.baseUrl }
       )
     )
@@ -156,6 +214,15 @@ export const replay = async (options: ReplayOptions): Promise<number> => {
         console.log(`  ${event.stepId.padEnd(4)} ${event.intent}`)
       if (event._tag === "RecoveryApplied") {
         console.log(`       ↻ recovered: ${event.recovery}`)
+      }
+      if (event._tag === "ControlHandedOver") {
+        console.log(`       ⇄ handed to a person (${event.trigger})`)
+      }
+      if (event._tag === "ControlReturned") {
+        console.log(
+          `       ⇄ ${event.by} handed back after ${event.operatorActions} ` +
+            `action(s) — ${event.disposition}`
+        )
       }
       if (event._tag === "TargetResolved" && event.resolution.rank > 0) {
         // A step no longer resolving the way it was recorded. Still works, but
@@ -174,8 +241,12 @@ export const replay = async (options: ReplayOptions): Promise<number> => {
 
     return code
   } finally {
-    await Effect.runPromise(surface.close())
-    await browser.close()
+    if (live) {
+      await live.close()
+    } else if (bare) {
+      await Effect.runPromise(bare.surface.close())
+      await bare.browser.close()
+    }
   }
 }
 

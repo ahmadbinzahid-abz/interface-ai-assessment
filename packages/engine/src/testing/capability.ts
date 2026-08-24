@@ -13,10 +13,15 @@ import {
   type Condition,
 } from "@workspace/contracts"
 
-import type { Vault } from "../../src/replay/bindings.js"
+import type { Vault } from "../replay/bindings.js"
 
 /**
  * A capability written by hand rather than taken from a discovery run.
+ *
+ * It lives in `src/testing` rather than beside one suite because more than one
+ * suite needs it — the replay taxonomy tests and the live-takeover test both
+ * need an artifact whose every branch is reachable, and duplicating it would
+ * mean two artifacts drifting apart.
  *
  * Every branch of the result taxonomy needs something to exercise it, and a
  * single recorded run only ever demonstrates the path it happened to take. This

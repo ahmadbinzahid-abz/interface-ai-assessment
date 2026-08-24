@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto"
 
-import type { Observation, TargetDescriptor } from "@workspace/contracts"
+import type {
+  Observation,
+  OperatorInput,
+  TargetDescriptor,
+} from "@workspace/contracts"
 import { Effect } from "effect"
 import type { CDPSession, Frame, Locator, Page } from "playwright"
 
@@ -16,6 +20,13 @@ import {
   type TargetResolutionError,
 } from "../errors.js"
 import { buildPlan, resolveInObservation } from "../resolve.js"
+import type {
+  PointDescription,
+  Screencast,
+  ScreencastFrame,
+  ScreencastOptions,
+  TakeoverSurface,
+} from "../takeover.js"
 import type {
   Actor,
   ElementDetail,
@@ -48,6 +59,114 @@ import { readObservation } from "./ax.js"
  */
 const TARGET_ATTRIBUTE = "data-cua-target"
 
+/**
+ * Keys whose meaning Chromium takes from the virtual key code rather than from
+ * the text, so a bare `text` never produces them.
+ *
+ * Small on purpose. This is not a keyboard layout table — it is the handful of
+ * keys that actually drive a form in this class of application, and anything
+ * outside it still works as text.
+ */
+const VIRTUAL_KEY_CODES: Record<string, number> = {
+  Backspace: 8,
+  Tab: 9,
+  Enter: 13,
+  Shift: 16,
+  Control: 17,
+  Alt: 18,
+  Escape: 27,
+  " ": 32,
+  PageUp: 33,
+  PageDown: 34,
+  End: 35,
+  Home: 36,
+  ArrowLeft: 37,
+  ArrowUp: 38,
+  ArrowRight: 39,
+  ArrowDown: 40,
+  Delete: 46,
+}
+
+/** Text a key produces when it produces any. Non-printable keys produce none. */
+const textFor = (key: string, declared?: string): string | undefined =>
+  declared ?? (key.length === 1 ? key : key === "Enter" ? "\r" : undefined)
+
+const dispatchInput = async (
+  cdp: CDPSession,
+  event: OperatorInput
+): Promise<void> => {
+  switch (event._tag) {
+    case "mouseMoved":
+      await cdp.send("Input.dispatchMouseEvent", {
+        type: "mouseMoved",
+        x: event.x,
+        y: event.y,
+        button: "none",
+      })
+      return
+
+    case "mousePressed":
+    case "mouseReleased":
+      await cdp.send("Input.dispatchMouseEvent", {
+        type: event._tag,
+        x: event.x,
+        y: event.y,
+        button: event.button,
+        clickCount: event.clickCount,
+        // Chromium ignores a press with no buttons mask, which is the failure
+        // mode that looks like "the click did nothing".
+        buttons: event._tag === "mousePressed" ? 1 : 0,
+      })
+      return
+
+    case "mouseWheel":
+      await cdp.send("Input.dispatchMouseEvent", {
+        type: "mouseWheel",
+        x: event.x,
+        y: event.y,
+        deltaX: event.deltaX,
+        deltaY: event.deltaY,
+      })
+      return
+
+    case "keyDown": {
+      const text = textFor(event.key, event.text)
+      await cdp.send("Input.dispatchKeyEvent", {
+        // `keyDown` carries text and produces a character; `rawKeyDown` is what
+        // a non-printable key needs, and sending the wrong one is why arrow keys
+        // silently do nothing.
+        type: text === undefined ? "rawKeyDown" : "keyDown",
+        key: event.key,
+        code: event.code,
+        text,
+        unmodifiedText: text,
+        windowsVirtualKeyCode: VIRTUAL_KEY_CODES[event.key],
+        nativeVirtualKeyCode: VIRTUAL_KEY_CODES[event.key],
+        modifiers: event.modifiers,
+      })
+      return
+    }
+
+    case "keyUp":
+      await cdp.send("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key: event.key,
+        code: event.code,
+        windowsVirtualKeyCode: VIRTUAL_KEY_CODES[event.key],
+        nativeVirtualKeyCode: VIRTUAL_KEY_CODES[event.key],
+        modifiers: event.modifiers,
+      })
+      return
+
+    case "insertText":
+      await cdp.send("Input.insertText", { text: event.text })
+      return
+  }
+}
+
+/** The web surface can be co-browsed, so it satisfies both halves. */
+export type WebSurface = Surface & TakeoverSurface
+
 export interface WebSurfaceOptions {
   readonly page: Page
   readonly lease: ControlLease
@@ -58,13 +177,16 @@ export const makeWebSurface = ({
   page,
   lease,
   defaultTimeoutMs = 10_000,
-}: WebSurfaceOptions): Effect.Effect<Surface, SurfaceUnavailable> =>
+}: WebSurfaceOptions): Effect.Effect<WebSurface, SurfaceUnavailable> =>
   Effect.gen(function* () {
     const cdp: CDPSession = yield* Effect.tryPromise({
       try: async () => {
         const session = await page.context().newCDPSession(page)
         await session.send("Accessibility.enable")
         await session.send("DOM.enable")
+        // Screencast frames are Page-domain events, and they arrive nowhere at
+        // all if the domain was never enabled.
+        await session.send("Page.enable")
         return session
       },
       catch: (cause) =>
@@ -527,6 +649,185 @@ export const makeWebSurface = ({
         catch: (cause) => new SurfaceUnavailable({ detail: String(cause) }),
       })
 
+    // ── Live takeover ────────────────────────────────────────────────────
+
+    /**
+     * Carry the live page out to an operator, frame by frame.
+     *
+     * CDP delivers a frame on paint and then *waits for an ack* before sending
+     * another, which is why the ack is unconditional and fire-and-forget: a
+     * consumer that failed to render must not be able to stall the screencast,
+     * and a stalled screencast during a takeover looks exactly like a frozen
+     * application.
+     *
+     * The frame's own device size travels with it. Input coordinates come back
+     * in that space, so the console never has to guess how its `<img>` was
+     * scaled, and there is one conversion in the system rather than two.
+     */
+    const startScreencast = (
+      onFrame: (frame: ScreencastFrame) => void,
+      options: ScreencastOptions = {}
+    ): Effect.Effect<Screencast, SurfaceError> =>
+      Effect.tryPromise({
+        try: async (): Promise<Screencast> => {
+          const listener = (payload: {
+            data: string
+            sessionId: number
+            metadata: { deviceWidth?: number; deviceHeight?: number }
+          }) => {
+            const viewport = page.viewportSize()
+
+            onFrame({
+              data: payload.data,
+              width: payload.metadata.deviceWidth ?? viewport?.width ?? 0,
+              height: payload.metadata.deviceHeight ?? viewport?.height ?? 0,
+              at: new Date().toISOString(),
+            })
+
+            void cdp
+              .send("Page.screencastFrameAck", { sessionId: payload.sessionId })
+              .catch(() => undefined)
+          }
+
+          cdp.on("Page.screencastFrame", listener)
+
+          await cdp.send("Page.startScreencast", {
+            format: "jpeg",
+            quality: options.quality ?? 60,
+            maxWidth: options.maxWidth,
+            maxHeight: options.maxHeight,
+            everyNthFrame: options.everyNthFrame ?? 1,
+          })
+
+          return {
+            stop: () =>
+              Effect.promise(async () => {
+                cdp.off("Page.screencastFrame", listener)
+                await cdp.send("Page.stopScreencast").catch(() => undefined)
+              }),
+          }
+        },
+        catch: (cause) => new SurfaceUnavailable({ detail: String(cause) }),
+      })
+
+    /**
+     * The operator's half of the co-browsing channel.
+     *
+     * Raw CDP input rather than Playwright's `page.mouse` on purpose: the point
+     * of a takeover is that the person can do things this system has no model
+     * of, so anything that first asks "which element is this?" would fail
+     * exactly on the screens takeovers exist for.
+     *
+     * It still goes through the lease. An open socket is not permission to act —
+     * only holding the session is, and the run reclaiming control revokes it
+     * mid-stream without the socket having to notice.
+     */
+    const dispatch = (
+      actor: Actor,
+      event: OperatorInput
+    ): Effect.Effect<void, SurfaceError> =>
+      Effect.gen(function* () {
+        if (!lease.permits(actor)) {
+          return yield* new ControlDenied({
+            actor: describeActor(actor),
+            holder: describeHolder(lease.current()),
+          })
+        }
+
+        return yield* Effect.tryPromise({
+          try: () => dispatchInput(cdp, event),
+          catch: (cause) =>
+            new InteractionFailed({
+              command: event._tag,
+              detail: String(cause),
+            }),
+        })
+      })
+
+    /**
+     * What the operator just touched, in accessibility terms.
+     *
+     * This is what keeps an operator action log promotable. A click is captured
+     * as a coordinate because that is what happened, and *also* as a role and a
+     * name because that is the only form a capability step can be written in.
+     * Without this half, "the operator's fix can become a new artifact version"
+     * would be a slogan.
+     */
+    const describeAt = (
+      x: number,
+      y: number
+    ): Effect.Effect<PointDescription, SurfaceError> =>
+      Effect.tryPromise({
+        try: async (): Promise<PointDescription> => {
+          const located = await cdp
+            .send("DOM.getNodeForLocation", {
+              x: Math.round(x),
+              y: Math.round(y),
+              includeUserAgentShadowDOM: false,
+            })
+            .catch(() => undefined)
+
+          if (!located?.backendNodeId) return { frame: [] }
+
+          const frame = await framePathOf(located.frameId)
+
+          const partial = await cdp
+            .send("Accessibility.getPartialAXTree", {
+              backendNodeId: located.backendNodeId,
+              fetchRelatives: false,
+            })
+            .catch(() => undefined)
+
+          const node = partial?.nodes?.[0]
+          const text = (value: { value?: unknown } | undefined) =>
+            typeof value?.value === "string" ? value.value : undefined
+
+          return {
+            role: text(node?.role),
+            name: text(node?.name),
+            value: text(node?.value),
+            frame,
+          }
+        },
+        catch: (cause) =>
+          new InteractionFailed({ command: "describeAt", detail: String(cause) }),
+      })
+
+    /** Frame id → the name path the rest of the system addresses frames by. */
+    const framePathOf = async (
+      frameId: string | undefined
+    ): Promise<readonly string[]> => {
+      if (!frameId) return []
+
+      const { frameTree } = await cdp.send("Page.getFrameTree")
+
+      const walk = (
+        node: {
+          frame: { id: string; name?: string }
+          childFrames?: unknown[]
+        },
+        path: readonly string[],
+        isRoot: boolean
+      ): readonly string[] | undefined => {
+        const here = isRoot
+          ? []
+          : [...path, node.frame.name || node.frame.id]
+
+        if (node.frame.id === frameId) return here
+
+        for (const child of (node.childFrames ?? []) as Parameters<
+          typeof walk
+        >[0][]) {
+          const found = walk(child, here, false)
+          if (found) return found
+        }
+
+        return undefined
+      }
+
+      return walk(frameTree, [], true) ?? []
+    }
+
     const close = (): Effect.Effect<void> =>
       Effect.promise(() => cdp.detach().catch(() => undefined))
 
@@ -538,7 +839,10 @@ export const makeWebSurface = ({
       describe,
       screenshot,
       close,
-    } satisfies Surface
+      dispatch,
+      startScreencast,
+      describeAt,
+    } satisfies WebSurface
   })
 
 export { describeActor, describeHolder }

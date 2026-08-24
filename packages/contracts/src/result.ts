@@ -128,6 +128,27 @@ export const TraceEvent = Schema.Union(
     stepId: Schema.String,
     outcome: Schema.String,
   }),
+  /**
+   * The run stopped and gave the session to a person.
+   *
+   * In the trace rather than only in the intervention record, because the one
+   * story an incident review needs is what happened to *this run* — and "a human
+   * did step 7 by hand" is the most important line in it.
+   */
+  Schema.TaggedStruct("ControlHandedOver", {
+    stepId: Schema.String,
+    interventionId: Schema.String,
+    trigger: Schema.String,
+    reason: Schema.String,
+  }),
+  Schema.TaggedStruct("ControlReturned", {
+    stepId: Schema.String,
+    interventionId: Schema.String,
+    by: Schema.String,
+    disposition: Schema.String,
+    /** How many actions the operator took. The detail is in the evidence. */
+    operatorActions: Schema.Number,
+  }),
   Schema.TaggedStruct("EvidenceCaptured", {
     stepId: Schema.optional(Schema.String),
     kind: Schema.String,

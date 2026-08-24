@@ -48,6 +48,11 @@ const USAGE = `cua — computer-use automation
                   {{baseUrl}}. Default http://localhost:4100
     --headed      Show the browser.
     --update-health  Write replay telemetry back into the artifact.
+    --live        Open a live-takeover gateway and *wait* for a person when the
+                  run gets stuck, instead of ending it. Prints the WebSocket URL
+                  an operator console connects to.
+    --wait        Milliseconds to wait for an operator before giving up.
+                  Only meaningful with --live. Default: wait indefinitely.
 
     No model, no API key. Secrets come from CUA_SECRET_<NAME> in the
     environment or .env — never from the artifact.
@@ -143,6 +148,8 @@ const main = async (): Promise<number> => {
         "base-url": { type: "string", default: "http://localhost:4100" },
         headed: { type: "boolean", default: false },
         "update-health": { type: "boolean", default: false },
+        live: { type: "boolean", default: false },
+        wait: { type: "string" },
       },
       strict: true,
     })
@@ -166,6 +173,8 @@ const main = async (): Promise<number> => {
       baseUrl: values["base-url"] as string,
       headed: values.headed as boolean,
       updateHealth: values["update-health"] as boolean,
+      live: values.live as boolean,
+      waitMs: values.wait ? Number(values.wait) : undefined,
     })
   }
 

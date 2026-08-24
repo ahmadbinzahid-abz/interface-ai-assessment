@@ -2,20 +2,7 @@ import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import {
-  CapabilityArtifact,
-  DeclaredOutcome,
-  Health,
-  InputParam,
-  OutputField,
-  PolicyBinding,
-  Provenance,
-  Recovery,
-  Step,
-  TargetBinding,
-  TargetDescriptor,
-  type Condition,
-} from "@workspace/contracts"
+import { CapabilityArtifact, Step } from "@workspace/contracts"
 import { coreBankReadonly, makeRedactor } from "@workspace/policy"
 import { ControlLease, makeWebSurface, type Surface } from "@workspace/surface"
 import { Effect } from "effect"
@@ -30,8 +17,7 @@ import {
   button,
   testVault,
   textPresent,
-} from "./fixtures/capability.js"
-import type { Vault } from "../src/replay/bindings.js"
+} from "../src/testing/capability.js"
 import { runReplay } from "../src/replay/executor.js"
 
 /**

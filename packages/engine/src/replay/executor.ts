@@ -5,7 +5,6 @@ import type {
   CapabilityArtifact,
   Observation,
   ReplayError,
-  ReplayOutputs,
   ReplayResult,
   ReplaySummary,
   Step,
@@ -21,6 +20,12 @@ import type {
 import { Effect } from "effect"
 
 import type { EvidenceWriter } from "../evidence.js"
+import type {
+  EscalationOutcome,
+  EscalationRequest,
+  Escalator,
+} from "../session/intervention.js"
+import type { Session } from "../session/session.js"
 import {
   resolveValueRef,
   substitute,
@@ -55,6 +60,14 @@ import { describeCondition, evaluateCondition } from "./conditions.js"
 /** Bounded, so a recovery loop cannot become an infinite one. */
 const MAX_STEP_ATTEMPTS = 3
 
+/**
+ * How many times one step may be handed to a person and come back.
+ *
+ * A human saying "try again" to a step that policy will refuse again is a loop
+ * with a person in it, which is worse than a loop without one.
+ */
+const MAX_HANDBACKS_PER_STEP = 2
+
 /** How long a step with no checkpoint is given to reveal an outcome. */
 const SETTLE_MS = 750
 
@@ -64,6 +77,22 @@ export interface ReplayDeps {
   readonly allowlist: AllowlistConfig
   readonly lease: ControlLease
   readonly vault: Vault
+  /**
+   * Where a run goes when it needs a person.
+   *
+   * Optional, and the difference it makes is the whole of live takeover. Without
+   * one, an escalation ends the run and returns `Escalated` — correct, and what
+   * a headless batch replay wants. With one, `raise` *blocks*: the session is
+   * handed to an operator, and the run continues from whatever they decided.
+   */
+  readonly escalator?: Escalator
+  /**
+   * The long-lived session this run is driving, when there is one.
+   *
+   * When present it owns the control lease and this run borrows it; when absent
+   * the run takes the lease directly, which is what a one-shot CLI replay does.
+   */
+  readonly session?: Session
 }
 
 export interface ReplayRequest {
@@ -79,8 +108,28 @@ const SESSION_EXPIRED =
 const APPLICATION_ERROR =
   /unexpected (application )?error|internal server error/i
 
+/**
+ * Run a capability, and give the session back however it ends.
+ *
+ * The release is a wrapper rather than a line before each `return` because there
+ * are a dozen ways a replay can finish and every one of them has to hand the
+ * session back. A run that failed while still holding the lease would lock out
+ * the operator who came to look at why.
+ */
 export const runReplay = (
-  { surface, evidence, allowlist, lease, vault }: ReplayDeps,
+  deps: ReplayDeps,
+  request: ReplayRequest
+): Effect.Effect<ReplayResult, never> =>
+  executeReplay(deps, request).pipe(
+    Effect.tap(() =>
+      Effect.sync(() => {
+        deps.session?.apply({ _tag: "runFinished" })
+      })
+    )
+  )
+
+const executeReplay = (
+  { surface, evidence, allowlist, lease, vault, escalator, session }: ReplayDeps,
   request: ReplayRequest
 ): Effect.Effect<ReplayResult, never> =>
   Effect.gen(function* () {
@@ -129,7 +178,10 @@ export const runReplay = (
 
     const bindings: Bindings = { baseUrl, inputs, outputs, vault }
 
-    lease.grantTo({ _tag: "automation", runId })
+    // A session owns its lease; a bare replay takes one. Either way the actor
+    // that reaches the surface is this run and nothing else.
+    if (session) session.apply({ _tag: "runStarted", runId })
+    else lease.grantTo({ _tag: "automation", runId })
 
     yield* Effect.promise(() =>
       evidence.event({
@@ -167,19 +219,139 @@ export const runReplay = (
 
     const recoveryBudget = new Map<string, number>()
 
+    // ── Escalation ───────────────────────────────────────────────────────
+
+    type StepOutcome =
+      | { readonly _tag: "acted" }
+      | { readonly _tag: "stop"; readonly result: ReplayResult }
+      /** A person took the session, did something, and gave it back. */
+      | {
+          readonly _tag: "handedBack"
+          readonly disposition: "retryStep" | "skipStep"
+        }
+
+    /**
+     * Stop and ask for a person.
+     *
+     * Two behaviours, one call site. Without an escalator the run ends here and
+     * returns `Escalated` — the right answer for an unattended batch replay,
+     * which has nobody to ask and should not pretend otherwise. With one, this
+     * *blocks*: the session is handed over, the operator drives the same live
+     * page, and what they decided comes back as the return value.
+     *
+     * The screenshot and the recent-action list are captured before handing over,
+     * because the point of an intervention is that the person does not have to
+     * reconstruct what happened.
+     */
+    const escalate = (
+      step: Step,
+      trigger: EscalationRequest["trigger"],
+      reason: string
+    ): Effect.Effect<StepOutcome, never> =>
+      Effect.gen(function* () {
+        const screenshotRef = yield* captureScreenshot(
+          `intervention-${step.id}`
+        )
+
+        const recentActions = trace
+          .filter(
+            (event): event is Extract<TraceEvent, { _tag: "StepStarted" }> =>
+              event._tag === "StepStarted"
+          )
+          .slice(-4)
+          .map((event) => `${event.stepId}: ${event.intent}`)
+
+        if (!escalator) {
+          const interventionId = `int-${randomUUID().slice(0, 8)}`
+
+          yield* Effect.promise(() =>
+            evidence.event({
+              kind: "InterventionRaised",
+              interventionId,
+              stepId: step.id,
+              intent: step.intent,
+              trigger,
+              reason,
+              screenshotRef,
+            })
+          )
+
+          yield* record({
+            _tag: "ControlHandedOver",
+            stepId: step.id,
+            interventionId,
+            trigger,
+            reason,
+          })
+
+          return {
+            _tag: "stop",
+            result: {
+              _tag: "Escalated",
+              summary: summary(),
+              interventionId,
+              reason,
+              atStepId: step.id,
+              trace,
+            },
+          }
+        }
+
+        const outcome: EscalationOutcome = yield* escalator.raise({
+          runId,
+          capability: artifact.name,
+          capabilityVersion: artifact.version,
+          tenant: artifact.target.tenant ?? null,
+          goal: artifact.description,
+          stepId: step.id,
+          stepIntent: step.intent,
+          trigger,
+          reason,
+          screenshotRef,
+          recentActions,
+        })
+
+        yield* record({
+          _tag: "ControlHandedOver",
+          stepId: step.id,
+          interventionId: outcome.interventionId,
+          trigger,
+          reason,
+        })
+
+        if (outcome._tag === "abort") {
+          return {
+            _tag: "stop",
+            result: {
+              _tag: "Escalated",
+              summary: summary(),
+              interventionId: outcome.interventionId,
+              reason: outcome.reason,
+              atStepId: step.id,
+              trace,
+            },
+          }
+        }
+
+        yield* record({
+          _tag: "ControlReturned",
+          stepId: step.id,
+          interventionId: outcome.interventionId,
+          by: outcome.by,
+          disposition: outcome.disposition,
+          operatorActions: outcome.operatorActions.length,
+        })
+
+        return { _tag: "handedBack", disposition: outcome.disposition }
+      })
+
     // ── Step execution ───────────────────────────────────────────────────
 
     /**
      * Perform one step's action. Resolution and the policy decision happen here,
      * so a refused step never reaches the surface.
      */
-    const performStep = (
-      step: Step
-    ): Effect.Effect<
-      | { readonly _tag: "acted" }
-      | { readonly _tag: "stop"; readonly result: ReplayResult },
-      never
-    > =>
+    const performStep = (step: Step): Effect.Effect<StepOutcome, never> =>
       Effect.gen(function* () {
         const action = step.action
         const observation = yield* observe
@@ -223,34 +395,19 @@ export const runReplay = (
         if (decision._tag === "RequireApproval") {
           /**
            * Not a failure. The guardrail wants a person, so the run pauses and
-           * an intervention is raised carrying the context needed to act on it.
-           * Phase 5 gives an operator the live session; the seam is here.
+           * hands over the live session rather than reporting an error and
+           * throwing away the state a person would need.
+           *
+           * Note which disposition ends this well: the operator presses the
+           * irreversible button themselves and hands back `skipStep`. Answering
+           * `retryStep` puts the automation back in front of a control policy
+           * will refuse again — which is why handbacks per step are bounded.
            */
-          const interventionId = `int-${randomUUID().slice(0, 8)}`
-
-          yield* captureScreenshot(`intervention-${step.id}`)
-          yield* Effect.promise(() =>
-            evidence.event({
-              kind: "InterventionRaised",
-              interventionId,
-              stepId: step.id,
-              intent: step.intent,
-              reason: decision.reason,
-              rule: decision.rule,
-            })
+          return yield* escalate(
+            step,
+            "policyRequiresApproval",
+            decision.reason
           )
-
-          return {
-            _tag: "stop",
-            result: {
-              _tag: "Escalated",
-              summary: summary(),
-              interventionId,
-              reason: decision.reason,
-              atStepId: step.id,
-              trace,
-            },
-          }
         }
 
         // ── Resolve and act ────────────────────────────────────────────
@@ -264,6 +421,27 @@ export const runReplay = (
 
           if (resolved._tag === "Left") {
             const error = resolved.left
+
+            /**
+             * The UI moved, and this is where a human is genuinely better than a
+             * retry. Every ranked strategy has already been tried; trying them
+             * again will fail identically. So when someone is available, hand
+             * over — an operator who can see the screen can get the run past a
+             * relabelled button in seconds, and the run still completes.
+             *
+             * With nobody available this stays a hard failure with the strategy
+             * count intact, which is the debuggable form.
+             */
+            if (escalator) {
+              return yield* escalate(
+                step,
+                error._tag === "AmbiguousTarget"
+                  ? "ambiguousTarget"
+                  : "targetNotFound",
+                `Could not resolve "${action.target.description}" for step ${step.id}.`
+              )
+            }
+
             yield* captureScreenshot(`failure-${step.id}`)
 
             return {
@@ -549,6 +727,7 @@ export const runReplay = (
        */
       let skipAction = false
       let justRecovered = false
+      let handbacks = 0
 
       while (!settled) {
         attempt += 1
@@ -565,6 +744,39 @@ export const runReplay = (
         if (!skipAction) {
           const performed = yield* performStep(step)
           if (performed._tag === "stop") return performed.result
+
+          if (performed._tag === "handedBack") {
+            handbacks += 1
+
+            if (handbacks > MAX_HANDBACKS_PER_STEP) {
+              return {
+                _tag: "Escalated",
+                summary: summary(),
+                interventionId: `int-exhausted-${step.id}`,
+                reason:
+                  `Step ${step.id} was handed to an operator ` +
+                  `${handbacks - 1} times and still cannot proceed.`,
+                atStepId: step.id,
+                trace,
+              }
+            }
+
+            if (performed.disposition === "retryStep") {
+              // A person cleared whatever blocked the step, so the automation
+              // starts from a genuinely different world. Giving the step its
+              // attempt budget back is the point of having asked.
+              attempt = 0
+              continue
+            }
+
+            /**
+             * `skipStep`: the operator did this step by hand. The action is not
+             * repeated — but the checkpoint still runs. Trusting a human's word
+             * that the screen is where it should be is exactly the assumption
+             * the checkpoint exists to remove, and it is no more warranted here
+             * than for the automation.
+             */
+          }
         }
         skipAction = false
 

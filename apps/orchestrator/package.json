@@ -18,8 +18,10 @@
     "@workspace/eslint-config": "workspace:*",
     "@workspace/typescript-config": "workspace:*",
     "eslint": "^9",
+    "target-corebank": "workspace:*",
     "tsx": "^4.23.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.11"
   },
   "dependencies": {
     "@effect/platform": "^0.97.1",

@@ -5,21 +5,23 @@ write-up is `/REPORT.md`.
 
 ## Start here (resuming in a fresh session)
 
-Phases 0–4 are done and committed; `/README.md` and `/REPORT.md` are written.
-`pnpm test` runs 116 tests with no database and no API key.
+Phases 0–5 are done; `/README.md` and `/REPORT.md` are written (they predate
+Phase 5 and need a takeover section). `pnpm test` runs 132 tests with no database
+and no API key.
 
 Remaining, in the order I would do them:
 
-1. **Live takeover (Phase 5).** The largest gap. The control lease is real and
-   enforced, escalation raises interventions carrying context and a screenshot —
-   the co-browsing surface (CDP `Page.startScreencast` + `Input.dispatch*` over a
-   WebSocket) is not built. §3.6 is a scored criterion and the brief says
-   explicitly "not just a TODO".
+1. **Operator console (Phase 6).** The gateway, the protocol and the intervention
+   inbox exist and are typed; nothing renders them. `features/interventions/
+   live-control/` is where the screencast `<img>` and input forwarding go, and
+   the protocol in `packages/contracts/src/takeover.ts` is the contract to build
+   against.
 2. **Re-record the capability** when quota resets, with a model strong enough to
    declare a `MemberNotFound` outcome — see the known imperfection below.
 3. **Replay against the second tenant** through an overlay. The merge is
    implemented and unit-tested; the end-to-end demonstration is not done.
-4. **Operator console (Phase 6)** and the **agent-facing capability catalog**.
+4. **Tenant overlay + capability catalog (Phase 7)**, then update `/REPORT.md`
+   §3.6 with the takeover design that now exists.
 
 Read `AGENTS.md` for conventions before writing code.
 
@@ -245,7 +247,7 @@ adding an outcome to a capability breaks the build until the UI handles it.
 | 2 ✅ | `packages/contracts` (schema + unions) and `packages/surface` (AX observation, ranked resolver, screencast) | Resolver unit tests pass on hostile markup; `Surface` signature has zero Playwright types |
 | 3 ✅ | Discovery loop (Gemini tool use), policy chokepoint, evidence writer, artifact compiler (parameterization + checkpoint inference) | **One real LLM run** completes the goal and emits an artifact into `/evidence/` |
 | 4 ✅ | Replay engine: executor, detection ordering, recovery layer, result contract, output extraction | Happy path + all seven fault paths hit the correct branch of the result union |
-| 5 | Session manager, control lease, intervention API, WS screencast + input forwarding, operator capture, handback | Live run pauses → human drives → hands back → run completes |
+| 5 ✅ | Session manager, control lease, intervention API, WS screencast + input forwarding, operator capture, handback | Live run pauses → human drives → hands back → run completes |
 | 6 | Operator console: catalog, run/evidence viewer, intervention inbox, take-control, playground | — |
 | 7 | Tenant overlay merge, drift telemetry, capability catalog as Gemini function declarations + demo invocation | One artifact replays on both tenant variants |
 | 8 ◐ | `/README.md`, `/REPORT.md` (their exact seven headings), `/evidence/` with discovery run + happy replay + **failing replay** | Tests green, `tsc --noEmit` clean |
@@ -439,6 +441,73 @@ already exists in a committed artifact and will fail without the matching suppor
 5. **Health write-back.** `health.fallbackHitRate` is the drift alarm described in §3,
    and replay is the only thing that can populate it — the resolution rank is already
    returned on every resolve.
+
+## 10e. Phase 5 status
+
+**Phase 5 — complete.** 132 tests. The gate is met by an integration test that
+takes no shortcuts: a real replay reaches a step policy will not let it perform,
+pauses, hands the live Chromium session to a WebSocket client that drives it with
+real `Input.dispatch*` events at coordinates read from the accessibility tree,
+hands back, and **the run continues and succeeds**.
+
+The design decision that made it work is that an escalation is a *call that
+blocks*, not an error that propagates. `Escalator.raise` returns the operator's
+decision, so the executor's "run pauses → human drives → run resumes" is literally
+what the code does. With no escalator configured the same call site returns
+`Escalated` and ends the run, which is what an unattended batch replay needs — the
+difference between attended and unattended operation is one optional dependency.
+
+Three things are worth keeping:
+
+- **The lease is derived from the state machine, never assigned.** `Session`
+  owns both, and `controlHolderOf` is the only thing that decides who may act.
+  The bug class where a console says "you have control" while the surface
+  disagrees is unrepresentable rather than merely tested for.
+- **A disconnect returns the session to the queue; it never resumes the run.** An
+  operator whose laptop slept mid-form decided nothing, and inferring a decision
+  from a dropped socket is how automation completes a half-finished transfer.
+- **`skipStep` is the disposition that ends a policy escalation well**, because
+  the operator pressed the irreversible button themselves. `retryStep` puts the
+  automation back in front of a control policy will refuse again — so handbacks
+  per step are bounded, and the checkpoint still runs after a `skipStep`. A
+  human's word that the screen is where it should be is exactly the assumption
+  the checkpoint exists to remove.
+
+### Two defects only a real socket surfaced
+
+1. **Messages were handled concurrently, so a mouse-up overtook its mouse-down.**
+   The press handler pauses to read the accessibility tree and the release
+   handler does not, so they reached the browser out of order and the click
+   silently did nothing. Each connection now processes messages strictly in
+   sequence. Input is a sequence, not a set.
+2. **The click target was described *after* the input was dispatched.** By then
+   the click had navigated and the node was gone, so every captured action had a
+   coordinate and no name — the log was faithful and unpromotable. The press is
+   read before it is forwarded, which is also the more honest target: a click
+   belongs to where the mouse went down.
+
+Also settled while building it: `DOM.getBoxModel` and `Input.dispatchMouseEvent`
+share the top-level viewport's coordinate space even for controls inside a
+frameset's child frame, so no per-frame offset is needed. Verified with a probe
+rather than assumed, because the alternative fails silently.
+
+### What is deliberately not policed
+
+An operator's *click* is classified and recorded but never refused. The
+intervention usually exists precisely so a person can press the button policy
+would not; blocking them would make takeover useless at the moment it matters. An
+operator's *navigation* is checked against the same allowlist as the automation —
+otherwise the takeover channel is an exfiltration path out of a machine holding
+banking credentials. That asymmetry is intentional and belongs in REPORT.md §6.
+
+To see it by hand:
+
+```
+pnpm --filter target-corebank dev          # terminal 1
+pnpm --filter orchestrator run cua replay   --capability lookupMemberSavingsBalance@1.0.0   --input memberId=12345 --live --headed
+```
+
+It prints a `ws://…/takeover` URL and blocks when it needs a person.
 
 ## 10. Status log
 
