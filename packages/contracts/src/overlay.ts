@@ -1,6 +1,11 @@
 import { Schema } from "effect"
 
-import { CapabilityArtifact, Recovery } from "./capability.js"
+import {
+  CapabilityArtifact,
+  Recovery,
+  Step,
+  TargetBinding,
+} from "./capability.js"
 import { TargetDescriptor } from "./targeting.js"
 
 /**
@@ -64,17 +69,19 @@ export const applyOverlay = (
 ): CapabilityArtifact =>
   new CapabilityArtifact({
     ...base,
-    target: {
+    // Constructed, not spread into a literal: these are schema classes and carry
+    // their own validation, so a plain object looks right and is rejected.
+    target: new TargetBinding({
       ...base.target,
       tenant: overlay.tenant,
       productVersion: overlay.productVersion ?? base.target.productVersion,
       entryPoint: overlay.entryPoint ?? base.target.entryPoint,
-    },
+    }),
     steps: base.steps.map((step) => {
       const replacement = overlay.targets[step.id]
       if (!replacement) return step
 
-      return { ...step, action: retarget(step.action, replacement) }
+      return new Step({ ...step, action: retarget(step.action, replacement) })
     }),
     recoveries: [...base.recoveries, ...overlay.extraRecoveries],
   })
