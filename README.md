@@ -12,6 +12,10 @@ discovery, replay, reuse, escalation, three distinct failure modes, and the same
 artifact running against two institutions — are in
 [`evidence/`](./evidence/README.md).
 
+[`docs/architecture.html`](./docs/architecture.html) is a diagram-led walkthrough
+of the same material — the pipeline, the detection ordering, the control-transfer
+machine, the tenant overlay merge. Open it in a browser; it needs no server.
+
 ---
 
 ## Setup
