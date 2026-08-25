@@ -267,9 +267,24 @@ adding an outcome to a capability breaks the build until the UI handles it.
 | "Session expired" banner | recoverable → re-auth → retry |
 | 3s stall on search endpoint | recoverable → bounded wait / retry |
 | "Scheduled maintenance" interstitial | recoverable → declared dismissal |
-| bad field value → validation error | business outcome |
+| bad field value → validation error | business outcome — **app-tested only**, see below |
 | hard 500 | hard failure with debuggable detail |
 | "Close Account" button present | irreversible action → policy blocks, escalates |
+
+Seven of the eight are driven **through the replay engine**, each landing on the
+correct branch of the result union. The `validation` row is the exception, and
+the reason is structural rather than an oversight: that fault only fires on the
+sub-account form POST, the shipped capability is read-only and never reaches
+that form, and no capability that does can be *recorded* — the form's submit
+button reads "Continue", which the allowlist classes `risky`, and discovery is
+hard-capped at `safe`.
+
+Nothing claims otherwise: REPORT says the faults are "armed out of band" and
+this table says "reachable", both of which are true, and the *error taxonomy*
+branch it maps to (business outcome) is covered twice over. Closing it properly
+needs no model — a hand-written sub-account capability alongside
+`packages/engine/src/testing/capability.ts` plus one integration test would take
+the matrix from 7/8 to 8/8 exercised through the real engine.
 
 ## 10a. Phase 2 findings
 
