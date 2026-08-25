@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { Either, Match } from "effect"
 
 import { Badge } from "@workspace/ui/components/badge"
@@ -35,6 +36,21 @@ import { useRun } from "../hooks/use-runs"
 export function RunDetailView({ runId }: { readonly runId: string }) {
   const query = useRun(runId)
 
+  /**
+   * Which tab is open, once the reader has said.
+   *
+   * Undefined means "nobody has chosen", and the tab then follows the run: the
+   * trace while it is still going, because that is the part that is changing,
+   * and the result once there is one. The moment the reader picks a tab it stops
+   * moving — a page that yanks you somewhere else while you are reading it is
+   * worse than one that makes you click.
+   *
+   * It also has to be *controlled*. `defaultValue` is read once, so deriving it
+   * from a run that is still in flight silently stopped working the instant the
+   * run finished — which is what Base UI was warning about.
+   */
+  const [chosen, setChosen] = useState<string | undefined>(undefined)
+
   if (query.isPending) return <LoadingRows />
   if (query.isError)
     return <ConnectionError onRetry={() => void query.refetch()} />
@@ -54,6 +70,7 @@ export function RunDetailView({ runId }: { readonly runId: string }) {
       ),
 
     onRight: (run) => {
+      const running = run.summary.outcome === "Running"
       const hasFrames = run.artifacts.some((file) =>
         file.name.startsWith("step-")
       )
@@ -83,11 +100,14 @@ export function RunDetailView({ runId }: { readonly runId: string }) {
           ends, because there is nothing live left to watch and the evidence is
           what remains.
         */}
-        {run.summary.outcome === "Running" ? (
+        {running ? (
           <RunLiveView runId={run.summary.runId} trace={run.trace} />
         ) : null}
 
-        <Tabs defaultValue={run.summary.outcome === "Running" ? "trace" : "result"}>
+        <Tabs
+          value={chosen ?? (running ? "trace" : "result")}
+          onValueChange={(value) => setChosen(String(value))}
+        >
           <TabsList>
             <TabsTrigger value="result">Result</TabsTrigger>
             <TabsTrigger value="trace">Trace</TabsTrigger>
