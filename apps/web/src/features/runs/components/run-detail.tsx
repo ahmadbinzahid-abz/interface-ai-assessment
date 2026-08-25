@@ -18,8 +18,10 @@ import {
   LoadingRows,
 } from "@/components/common/status/query-states"
 import { EvidenceFiles } from "@/features/runs/evidence/components/evidence-files"
+import { Filmstrip } from "@/features/runs/evidence/components/filmstrip"
 import { TraceTimeline } from "@/features/runs/evidence/components/trace-timeline"
 import { ReplayResultView } from "./replay-result-view"
+import { RunLiveView } from "./run-live-view"
 import { useRun } from "../hooks/use-runs"
 
 /**
@@ -51,7 +53,12 @@ export function RunDetailView({ runId }: { readonly runId: string }) {
         ))
       ),
 
-    onRight: (run) => (
+    onRight: (run) => {
+      const hasFrames = run.artifacts.some((file) =>
+        file.name.startsWith("step-")
+      )
+
+      return (
       <div className="flex flex-col gap-6">
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-3">
@@ -70,10 +77,23 @@ export function RunDetailView({ runId }: { readonly runId: string }) {
           </p>
         </div>
 
-        <Tabs defaultValue="result">
+        {/*
+          While the run is in flight the live view *is* the content, so it sits
+          above the tabs rather than behind one. It disappears the moment the run
+          ends, because there is nothing live left to watch and the evidence is
+          what remains.
+        */}
+        {run.summary.outcome === "Running" ? (
+          <RunLiveView runId={run.summary.runId} trace={run.trace} />
+        ) : null}
+
+        <Tabs defaultValue={run.summary.outcome === "Running" ? "trace" : "result"}>
           <TabsList>
             <TabsTrigger value="result">Result</TabsTrigger>
             <TabsTrigger value="trace">Trace</TabsTrigger>
+            {hasFrames ? (
+              <TabsTrigger value="filmstrip">Filmstrip</TabsTrigger>
+            ) : null}
             <TabsTrigger value="evidence">Evidence</TabsTrigger>
           </TabsList>
 
@@ -89,7 +109,7 @@ export function RunDetailView({ runId }: { readonly runId: string }) {
                 */}
                 {run.summary.kind === "discovery"
                   ? "A discovery run produces an artifact rather than an answer. Its recording is in the evidence tab."
-                  : "Still running — the result is written when the run finishes."}
+                  : "The result is written when the run finishes. Until then, watch it above and follow the steps in the trace."}
               </p>
             )}
           </TabsContent>
@@ -98,11 +118,22 @@ export function RunDetailView({ runId }: { readonly runId: string }) {
             <TraceTimeline trace={run.trace} />
           </TabsContent>
 
+          {hasFrames ? (
+            <TabsContent value="filmstrip" className="pt-4">
+              <Filmstrip
+                runId={run.summary.runId}
+                artifacts={run.artifacts}
+                trace={run.trace}
+              />
+            </TabsContent>
+          ) : null}
+
           <TabsContent value="evidence" className="pt-4">
             <EvidenceFiles runId={run.summary.runId} artifacts={run.artifacts} />
           </TabsContent>
         </Tabs>
       </div>
-    ),
+      )
+    },
   })
 }

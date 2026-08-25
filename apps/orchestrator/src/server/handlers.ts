@@ -139,6 +139,7 @@ export const makeApiLayer = (orchestrator: Orchestrator) => {
               inputs: payload.inputs,
               baseUrl: payload.baseUrl,
               live: payload.live,
+              captureSteps: payload.captureSteps ?? false,
             })
           )
 

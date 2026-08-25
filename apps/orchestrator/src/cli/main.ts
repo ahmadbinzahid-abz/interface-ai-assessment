@@ -54,6 +54,9 @@ const USAGE = `cua — computer-use automation
                   an operator console connects to.
     --wait        Milliseconds to wait for an operator before giving up.
                   Only meaningful with --live. Default: wait indefinitely.
+    --capture-steps  Screenshot after every step, not only on failure, so a
+                  finished run can be looked through frame by frame. Roughly
+                  doubles the wall time, which is why it is opt-in.
     --tenant      Run this institution's variant, resolved through
                   capabilities/overlays/<capability>.<tenant>.json. One
                   recording serves every tenant of the same vendor product.
@@ -172,6 +175,7 @@ const main = async (): Promise<number> => {
         live: { type: "boolean", default: false },
         wait: { type: "string" },
         tenant: { type: "string" },
+        "capture-steps": { type: "boolean", default: false },
       },
       strict: true,
     })
@@ -198,6 +202,7 @@ const main = async (): Promise<number> => {
       live: values.live as boolean,
       waitMs: values.wait ? Number(values.wait) : undefined,
       tenant: values.tenant,
+      captureSteps: values["capture-steps"] as boolean,
     })
   }
 

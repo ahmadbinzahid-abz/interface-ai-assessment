@@ -44,7 +44,7 @@ discovery run costs about a dozen. `GEMINI_MODEL` selects the model; see
 pnpm test
 ```
 
-172 tests. They start the stand-in application themselves on an ephemeral port and
+174 tests. They start the stand-in application themselves on an ephemeral port and
 drive a real Chromium, so this exercises nearly the whole system without any
 external service:
 
@@ -166,6 +166,30 @@ rates back onto the artifact, and names the steps that need an overlay entry:
 ```bash
 … cua replay … --tenant riverbend --update-health
 ```
+
+### Seeing the run, not just the answer
+
+A replay finishes in about two seconds, so by default it is over before you can
+look at it, and screenshots are captured only on failure. Three ways to see it:
+
+```bash
+… cua replay … --headed            # watch Chromium drive, live
+… cua replay … --capture-steps     # keep a frame from every step
+```
+
+`--capture-steps` writes `step-s1.png … step-sN.png` into the run's evidence
+directory and roughly doubles the wall time, which is why it is opt-in. The
+console pairs each frame with that step's English intent under a **Filmstrip**
+tab — a screenshot alone shows a page, a screenshot beside *"Entering the member
+ID to search for the member"* shows whether the automation was doing what it
+believed it was doing.
+
+The console also streams a **live view** on any run still in flight: the same
+CDP screencast the takeover uses, pointed at a running session. Connecting is
+read-only by construction — acting requires holding the control lease, and the
+automation is holding it — so watching is safe for anyone with the URL. If the
+run then pauses for a person, the panel says so and links straight to the
+intervention.
 
 ### 5. What an AI agent is handed
 

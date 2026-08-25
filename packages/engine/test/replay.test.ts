@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises"
+import { mkdtemp, readdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -51,7 +51,8 @@ const allowlistFor = (baseUrl: string) =>
 
 const replay = (
   inputs: Record<string, string>,
-  artifact = lookupCapability()
+  artifact = lookupCapability(),
+  options: { readonly captureSteps?: boolean } = {}
 ) =>
   Effect.runPromise(
     runReplay(
@@ -62,7 +63,12 @@ const replay = (
         lease,
         vault,
       },
-      { artifact, inputs, baseUrl: corebank.baseUrl }
+      {
+        artifact,
+        inputs,
+        baseUrl: corebank.baseUrl,
+        captureSteps: options.captureSteps,
+      }
     )
   )
 
@@ -347,6 +353,34 @@ describe("evidence", () => {
       (event) => event._tag === "TargetResolved"
     )
     expect(resolved.length).toBeGreaterThan(0)
+  })
+
+  it("captures nothing extra unless asked", async () => {
+    const result = await replay({ memberId: "12345" })
+    if (result._tag !== "Succeeded") throw new Error("expected success")
+
+    const files = await readdir(evidence.runDir)
+
+    // A screenshot per step roughly doubles a replay's wall time. An unattended
+    // job running a thousand times a day should not pay that by default.
+    expect(files.filter((file) => file.startsWith("step-"))).toEqual([])
+  })
+
+  it("keeps a frame per step when asked, so a finished run can be watched back", async () => {
+    const result = await replay({ memberId: "12345" }, lookupCapability(), {
+      captureSteps: true,
+    })
+    if (result._tag !== "Succeeded") throw new Error("expected success")
+
+    const files = await readdir(evidence.runDir)
+    const frames = files.filter((file) => file.startsWith("step-")).sort()
+
+    // One per step, named for the step so the console can pair each frame with
+    // that step's English intent — a screenshot alone shows a page, a screenshot
+    // beside its intent shows whether the automation knew what it was doing.
+    expect(frames.length).toBe(7)
+    expect(frames).toContain("step-s1.png")
+    expect(frames).toContain("step-s7.png")
   })
 
   it("captures a screenshot when a step fails", async () => {

@@ -34,10 +34,22 @@ export function ScreencastSurface({
   frame,
   driving,
   onSend,
+  idleLabel = "watching — take control to drive",
+  waitingLabel = "Waiting for the first frame…",
 }: {
   readonly frame: TakeoverFrame | undefined
   readonly driving: boolean
   readonly onSend: (message: TakeoverClientMessage) => void
+  /**
+   * What the overlay says when this viewer is not driving.
+   *
+   * Two callers, two truths: on an intervention nobody is driving and the label
+   * invites you to take over; on a run in flight the *automation* is driving and
+   * inviting a takeover would be a lie. Same surface, same guarantees, honest
+   * copy either way.
+   */
+  readonly idleLabel?: string
+  readonly waitingLabel?: string
 }) {
   const imageRef = useRef<HTMLImageElement | null>(null)
 
@@ -147,14 +159,14 @@ export function ScreencastSurface({
       ) : (
         <div className="flex aspect-[4/3] items-center justify-center gap-3 text-sm text-muted-foreground">
           <Spinner />
-          Waiting for the first frame…
+          {waitingLabel}
         </div>
       )}
 
       {!driving ? (
         <div className="pointer-events-none absolute inset-0 flex items-start justify-end p-3">
           <span className="rounded-md bg-background/90 px-2 py-1 text-xs text-muted-foreground">
-            watching — take control to drive
+            {idleLabel}
           </span>
         </div>
       ) : null}

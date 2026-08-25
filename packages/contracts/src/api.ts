@@ -196,6 +196,19 @@ export class ReplayRequestPayload extends Schema.Class<ReplayRequestPayload>(
    * forever waiting for somebody is worse than one that reports it needed them.
    */
   live: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
+   * Screenshot after every step, so a finished run can be looked through.
+   *
+   * A replay takes about two seconds — it is over before anyone can watch it —
+   * and screenshots are otherwise captured only on failure. This trades roughly
+   * double the wall time for the ability to see what each screen looked like.
+   *
+   * Plain `optional` rather than `optionalWith(default)`: a default makes the
+   * field optional on the wire but *required* in the type callers construct, so
+   * adding one breaks every existing caller. The handler applies the default
+   * instead, which is where a default belongs.
+   */
+  captureSteps: Schema.optional(Schema.Boolean),
 }) {}
 
 /**
@@ -210,6 +223,14 @@ export class ReplayAccepted extends Schema.Class<ReplayAccepted>(
 )({
   runId: Schema.String,
   evidenceRef: Schema.String,
+  /**
+   * Where to watch this run happen, and — if it pauses — where to drive it.
+   *
+   * One socket, two privileges: connecting streams the live page, while acting
+   * requires claiming an intervention. Watching is therefore safe for anyone
+   * with the URL, which is why it is offered for every run rather than only for
+   * attended ones.
+   */
   takeoverUrl: Schema.NullOr(Schema.String),
 }) {}
 

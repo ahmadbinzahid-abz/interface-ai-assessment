@@ -59,6 +59,8 @@ export interface ReplayOptions {
    * that differs — one recording, one artifact, N thin files.
    */
   readonly tenant?: string
+  /** Screenshot after every step, not only on failure. */
+  readonly captureSteps: boolean
 }
 
 /** Exit codes distinguish the branches of the result union for a shell caller. */
@@ -244,6 +246,7 @@ export const replay = async (options: ReplayOptions): Promise<number> => {
           artifact,
           inputs: options.inputs,
           baseUrl: options.baseUrl,
+          captureSteps: options.captureSteps,
           runId,
         }
       )

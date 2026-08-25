@@ -359,7 +359,7 @@ implementation; a real deployment would put a managed secret store behind it.
 
 ## 7. Cuts
 
-**What is built and tested** (172 tests, no database or API key required): the
+**What is built and tested** (174 tests, no database or API key required): the
 discovery loop against a real application with a real model; the artifact schema;
 deterministic replay with the full error taxonomy; live takeover over a CDP
 screencast with a real, enforced control lease; the typed HTTP API and the operator

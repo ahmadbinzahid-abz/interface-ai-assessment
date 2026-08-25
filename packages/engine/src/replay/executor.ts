@@ -101,6 +101,13 @@ export interface ReplayRequest {
   /** Which institution's install to run against. Substituted for `{{baseUrl}}`. */
   readonly baseUrl: string
   /**
+   * Capture a screenshot after every step, not only on failure.
+   *
+   * The difference between "the run returned TargetNotFound at s7" and being
+   * able to see what the screen looked like at s5 and s6.
+   */
+  readonly captureSteps?: boolean
+  /**
    * The id this run is already known by.
    *
    * A caller that has opened an evidence directory has *already* named the run,
@@ -142,7 +149,7 @@ const executeReplay = (
   request: ReplayRequest
 ): Effect.Effect<ReplayResult, never> =>
   Effect.gen(function* () {
-    const { artifact, inputs, baseUrl } = request
+    const { artifact, inputs, baseUrl, captureSteps = false } = request
 
     const runId =
       request.runId ??
@@ -866,6 +873,16 @@ const executeReplay = (
             return failed(detection.error)
 
           case "ok":
+            /**
+             * A frame of the run, when the caller asked for one.
+             *
+             * Off by default because a screenshot per step roughly doubles a
+             * replay's wall time, and an unattended job running a thousand times
+             * a day should not pay that to produce images nobody opens. On by
+             * choice, it turns a two-second run — over before anyone can watch
+             * it — into something a person can actually look through afterwards.
+             */
+            if (captureSteps) yield* captureScreenshot(`step-${step.id}`)
             settled = true
             break
         }

@@ -51,6 +51,7 @@ export function RunCapabilityForm({
   const [values, setValues] = useState<Record<string, string>>({})
   const [baseUrl, setBaseUrl] = useState("http://localhost:4100")
   const [live, setLive] = useState(true)
+  const [captureSteps, setCaptureSteps] = useState(true)
 
   const start = useApiMutation(
     (client, payload: Parameters<typeof client.runs.start>[0]["payload"]) =>
@@ -71,6 +72,7 @@ export function RunCapabilityForm({
       inputs: values,
       baseUrl,
       live,
+      captureSteps,
       tenant,
     })
   }
@@ -137,6 +139,24 @@ export function RunCapabilityForm({
                 Wait for a person if it gets stuck
               </FieldLabel>
             </Field>
+
+            <Field orientation="horizontal">
+              <input
+                id="captureSteps"
+                type="checkbox"
+                checked={captureSteps}
+                onChange={(event) => setCaptureSteps(event.target.checked)}
+                className="size-4 accent-primary"
+              />
+              <FieldLabel htmlFor="captureSteps">
+                Screenshot every step
+              </FieldLabel>
+            </Field>
+            <FieldDescription>
+              A replay finishes in about two seconds, so it is usually over
+              before you can watch it. This keeps a frame from every step to
+              look through afterwards, at roughly double the wall time.
+            </FieldDescription>
           </FieldGroup>
         </CardContent>
 

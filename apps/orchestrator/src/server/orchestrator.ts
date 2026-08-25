@@ -32,13 +32,24 @@ export interface StartReplayOptions {
   readonly baseUrl: string
   /** Wait for a person when the run gets stuck, instead of ending it. */
   readonly live: boolean
+  /** Screenshot after every step, not only on failure. */
+  readonly captureSteps?: boolean
   readonly headed?: boolean
 }
 
 export interface StartedReplay {
   readonly runId: string
   readonly evidenceRef: string
-  readonly takeoverUrl: string | null
+  /**
+   * Where to watch this run, and — if it pauses — where to drive it.
+   *
+   * One socket, two privileges. Connecting to it streams the live page and
+   * nothing more; *acting* requires claiming an intervention that is genuinely
+   * awaiting an operator, which the control lease enforces. So this is populated
+   * for every run rather than only for attended ones: a person should be able to
+   * watch an automation work without being able to interfere with it.
+   */
+  readonly takeoverUrl: string
 }
 
 /**
@@ -196,7 +207,13 @@ export class Orchestrator {
         },
         // The same id the evidence directory is named after, so every
         // screenshot reference in an intervention resolves.
-        { artifact, inputs, baseUrl, runId }
+        {
+          artifact,
+          inputs,
+          baseUrl,
+          captureSteps: options.captureSteps ?? false,
+          runId,
+        }
       )
     )
       .then((result) => evidence.json("result", result))
@@ -214,7 +231,7 @@ export class Orchestrator {
     return {
       runId,
       evidenceRef: evidence.runDir,
-      takeoverUrl: options.live ? live.takeoverUrl : null,
+      takeoverUrl: live.takeoverUrl,
     }
   }
 
